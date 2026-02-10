@@ -5,28 +5,21 @@ For each WSI in an input directory, this script:
 - estimates the median stain intensity matrix via `estimate_median_matrix`
 - saves the resulting stain matrix as a NumPy `.npy` file under `wsi_features/`
 
-Example (WSL path converted from `D:\\BCCRC-work\\NucSegAI\\sample_wsi`):
+Example (WSL path converted from `D:\\BCCRC-work\\NucSegAI\\sample_wsi`),
+running entirely on CPU:
 
     python extract_wsi_features.py \
         --wsi_dir /mnt/d/BCCRC-work/NucSegAI/sample_wsi \
-        --output_dir wsi_features \
-        --device cuda
+        --output_dir wsi_features
 """
 
 import argparse
-import os
+import time
 from pathlib import Path
 
 import numpy as np
-
-try:
-    import openslide  # type: ignore
-except ImportError as e:  # pragma: no cover - runtime check
-    raise ImportError(
-        "openslide-python is required for WSI reading but is not installed.\n"
-        "Install it via conda (recommended):\n"
-        "  conda install -c conda-forge openslide openslide-python\n"
-    ) from e
+import torch
+import openslide  # type: ignore
 
 from torchvahadane import TorchVahadaneNormalizer
 from torchvahadane.wsi_util import estimate_median_matrix
@@ -80,9 +73,21 @@ def extract_stain_feature_for_wsi(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Processing WSI: {wsi_path}")
+    print(f"\nProcessing WSI: {wsi_path}")
     osh = openslide.open_slide(str(wsi_path))
+    level_dims = osh.level_dimensions
+    print(f"  Number of levels: {osh.level_count}")
+    print(f"  Level 0 size (W x H): {level_dims[0]}")
+    print(f"  Using openslide level for estimation: {osh_level}")
+    print(f"  Tile size: {tile_size}, num_workers: {num_workers}")
+    print(f"  TorchVahadane device: {device}")
 
+    if device.startswith("cuda"):
+        print(f"  CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"  CUDA device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
+
+    t0 = time.perf_counter()
     normalizer = TorchVahadaneNormalizer(device=device)
     stain_matrix = estimate_median_matrix(
         osh,
@@ -91,12 +96,14 @@ def extract_stain_feature_for_wsi(
         tile_size=tile_size,
         num_workers=num_workers,
     )
+    t1 = time.perf_counter()
 
     feature_filename = wsi_path.stem + "_stain_matrix.npy"
     out_path = output_dir / feature_filename
     np.save(out_path, stain_matrix)
 
-    print(f"Saved stain matrix to: {out_path} (shape={stain_matrix.shape})")
+    print(f"  Estimation time: {t1 - t0:.2f} s")
+    print(f"  Saved stain matrix to: {out_path} (shape={stain_matrix.shape})")
     return out_path
 
 
@@ -126,8 +133,8 @@ def parse_args() -> argparse.Namespace:
         "--device",
         type=str,
         required=False,
-        default="cuda",
-        help='Device for TorchVahadaneNormalizer (e.g. "cuda" or "cpu").',
+        default="cpu",
+        help='Device for TorchVahadaneNormalizer (e.g. "cpu" or "cuda"). Default: "cpu".',
     )
     parser.add_argument(
         "--osh_level",
@@ -170,8 +177,21 @@ def main() -> None:
 
     print(f"Found {len(wsi_files)} WSI file(s) in {wsi_dir}")
     print(f"Output directory: {output_dir.resolve()}")
+    print(f"Requested TorchVahadane device: {args.device}")
+    if args.device.startswith("cuda"):
+        print(f"torch.cuda.is_available(): {torch.cuda.is_available()}")
 
     for wsi_path in wsi_files:
+        # Skip if this WSI already has a saved stain matrix
+        feature_filename = wsi_path.stem + "_stain_matrix.npy"
+        existing_path = output_dir / feature_filename
+        if existing_path.exists():
+            print(
+                f"\nSkipping WSI (already processed): {wsi_path}\n"
+                f"  Existing feature file: {existing_path}"
+            )
+            continue
+
         try:
             extract_stain_feature_for_wsi(
                 wsi_path=wsi_path,
