@@ -75,7 +75,7 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
-    normalizer = TorchVahadaneNormalizer(device=device, staintools_estimate=STAINTOOLS_ESTIMATE)
+    normalizer = TorchVahadaneNormalizer(device=device, staintools_estimate=STAINTOOLS_ESTIMATE, correct_exposure=True)
     normalizer.fit(ref)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

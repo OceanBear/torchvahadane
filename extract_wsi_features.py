@@ -2,14 +2,14 @@
 Extract robust stain features from Whole Slide Images (WSIs) using TorchVahadane.
 
 For each WSI in an input directory, this script:
-- estimates the median stain intensity matrix via `estimate_median_matrix`
-- saves the resulting stain matrix as a NumPy `.npy` file under `wsi_features/`
+- estimates the median stain intensity matrix and max concentrations (maxCRef) via `estimate_median_matrix_and_maxC`
+- saves the stain matrix and maxCRef as NumPy `.npy` files under `wsi_features/`
 
-Example (WSL path converted from `D:\\BCCRC-work\\NucSegAI\\sample_wsi`),
+Example (WSL path converted from `F:\\projects\\Pathology\\HandE\\SOW1885_n=201_AT2 40X`),
 running entirely on CPU:
 
     python extract_wsi_features.py \
-        --wsi_dir /mnt/d/BCCRC-work/NucSegAI/sample_wsi \
+        --wsi_dir "/mnt/f/projects/Pathology/HandE/SOW1885_n=201_AT2 40X" \
         --output_dir wsi_features
 """
 
@@ -22,7 +22,7 @@ import torch
 import openslide  # type: ignore
 
 from torchvahadane import TorchVahadaneNormalizer
-from torchvahadane.wsi_util import estimate_median_matrix
+from torchvahadane.wsi_util import estimate_median_matrix_and_maxC
 
 
 WSI_EXTENSIONS = (
@@ -52,6 +52,8 @@ def extract_stain_feature_for_wsi(
     osh_level: int = 0,
     tile_size: int = 4096,
     num_workers: int = 4,
+    subsample_fraction: float = 1.0,
+    subsample_seed: int = 42,
 ) -> Path:
     """
     Estimate the median stain matrix for a single WSI and save it as `.npy`.
@@ -80,6 +82,8 @@ def extract_stain_feature_for_wsi(
     print(f"  Level 0 size (W x H): {level_dims[0]}")
     print(f"  Using openslide level for estimation: {osh_level}")
     print(f"  Tile size: {tile_size}, num_workers: {num_workers}")
+    if subsample_fraction < 1.0:
+        print(f"  Subsampling: keep {subsample_fraction*100:.0f}% of tissue tiles (seed={subsample_seed})")
     print(f"  TorchVahadane device: {device}")
 
     if device.startswith("cuda"):
@@ -89,22 +93,30 @@ def extract_stain_feature_for_wsi(
 
     t0 = time.perf_counter()
     normalizer = TorchVahadaneNormalizer(device=device)
-    stain_matrix = estimate_median_matrix(
+    stain_matrix, maxCRef, od_percentiles = estimate_median_matrix_and_maxC(
         osh,
         normalizer,
         osh_level=osh_level,
         tile_size=tile_size,
         num_workers=num_workers,
+        subsample_fraction=subsample_fraction,
+        subsample_seed=subsample_seed,
     )
     t1 = time.perf_counter()
 
-    feature_filename = wsi_path.stem + "_stain_matrix.npy"
-    out_path = output_dir / feature_filename
-    np.save(out_path, stain_matrix)
+    stem = wsi_path.stem
+    stain_path = output_dir / (stem + "_stain_matrix.npy")
+    maxC_path = output_dir / (stem + "_maxCRef.npy")
+    od_path = output_dir / (stem + "_od_percentiles.npy")
+    np.save(stain_path, stain_matrix)
+    np.save(maxC_path, maxCRef)
+    np.save(od_path, od_percentiles)
 
     print(f"  Estimation time: {t1 - t0:.2f} s")
-    print(f"  Saved stain matrix to: {out_path} (shape={stain_matrix.shape})")
-    return out_path
+    print(f"  Saved stain matrix to: {stain_path} (shape={stain_matrix.shape})")
+    print(f"  Saved maxCRef to: {maxC_path} (shape={maxCRef.shape})")
+    print(f"  Saved OD percentiles to: {od_path} (shape={od_percentiles.shape}, p50/90/95/99 per H,E)")
+    return stain_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,11 +127,11 @@ def parse_args() -> argparse.Namespace:
         "--wsi_dir",
         type=str,
         required=False,
-        default="/mnt/d/BCCRC-work/NucSegAI/sample_wsi",
+        default="/mnt/f/projects/Pathology/HandE/SOW1885_n=201_AT2 40X",    # "/mnt/f/projects/Pathology/HandE/SOW1885_n=201_AT2 40X"
         help=(
             "Directory containing WSI files. "
-            "For the sample path 'D:\\\\BCCRC-work\\\\NucSegAI\\\\sample_wsi' on Windows, "
-            "the corresponding WSL path is '/mnt/d/BCCRC-work/NucSegAI/sample_wsi'."
+            "For the sample path 'F:\\\\projects\\\\Pathology\\\\HandE\\\\SOW1885_n=201_AT2 40X' on Windows, "
+            "the corresponding WSL path is '/mnt/f/projects/Pathology/HandE/SOW1885_n=201_AT2 40X'."
         ),
     )
     parser.add_argument(
@@ -147,15 +159,29 @@ def parse_args() -> argparse.Namespace:
         "--tile_size",
         type=int,
         required=False,
-        default=4096,
+        default=4096,   # was 4096
         help="Tile size used in the grid search for stain estimation (default: 4096).",
     )
     parser.add_argument(
         "--num_workers",
         type=int,
         required=False,
-        default=4,
+        default=1,
         help="Number of workers used for parallel processing (default: 4).",
+    )
+    parser.add_argument(
+        "--subsample_fraction",
+        type=float,
+        required=False,
+        default=0.5,    # was 0.5
+        help="Fraction of tissue-passing tiles to keep, e.g. 0.5 for 50pct, 0.3 for 30pct (default: 1.0 = no subsampling).",
+    )
+    parser.add_argument(
+        "--subsample_seed",
+        type=int,
+        required=False,
+        default=42,
+        help="Random seed for subsampling (default: 42).",
     )
     return parser.parse_args()
 
@@ -182,13 +208,15 @@ def main() -> None:
         print(f"torch.cuda.is_available(): {torch.cuda.is_available()}")
 
     for wsi_path in wsi_files:
-        # Skip if this WSI already has a saved stain matrix
-        feature_filename = wsi_path.stem + "_stain_matrix.npy"
-        existing_path = output_dir / feature_filename
-        if existing_path.exists():
+        # Skip if this WSI already has saved stain matrix, maxCRef, and od_percentiles
+        stem = wsi_path.stem
+        stain_path = output_dir / (stem + "_stain_matrix.npy")
+        maxC_path = output_dir / (stem + "_maxCRef.npy")
+        od_path = output_dir / (stem + "_od_percentiles.npy")
+        if stain_path.exists() and maxC_path.exists() and od_path.exists():
             print(
                 f"\nSkipping WSI (already processed): {wsi_path}\n"
-                f"  Existing feature file: {existing_path}"
+                f"  Existing: {stain_path.name}, {maxC_path.name}, {od_path.name}"
             )
             continue
 
@@ -200,6 +228,8 @@ def main() -> None:
                 osh_level=args.osh_level,
                 tile_size=args.tile_size,
                 num_workers=args.num_workers,
+                subsample_fraction=args.subsample_fraction,
+                subsample_seed=args.subsample_seed,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             print(f"Failed to process {wsi_path}: {exc}")
