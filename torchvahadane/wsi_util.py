@@ -22,20 +22,6 @@ def _check_mask_bounds(x,y, mask, tile_size, ds_m, thresh=0.5):
     return ((x >= mask.shape[1] or y >= mask.shape[0]) or mask[y:y+t_s_mask,x:x+t_s_mask].mean() < thresh)
 
 
-OD_PERCENTILES = (50, 90, 95, 99)
-
-
-def _get_concentrations_for_tile(tile, stain_matrix, stain_extractor):
-    """Deconvolve tile with given stain matrix; return H and E concentrations (tissue pixels only)."""
-    tissue_mask = stain_extractor.get_tissue_mask(tile).reshape((-1,))
-    OD = convert_RGB_to_OD_cpu(tile).reshape((-1, 3))
-    OD_masked = OD[tissue_mask]
-    HE = stain_matrix.T
-    Y = OD_masked.T
-    C, _, _, _ = np.linalg.lstsq(HE, Y, rcond=None)
-    return C[0, :], C[1, :]
-
-
 def _get_stain_matrix_and_maxC(tile, stain_extractor, percentile=99):
     """
     For a single tile, estimate stain matrix and max concentrations (99th percentile per stain).
@@ -189,30 +175,7 @@ def estimate_median_matrix_and_maxC(
         np.median(stain_matrices, axis=0), axis=1
     )[:, None]
     maxCRef = np.median(maxCs, axis=0)
-
-    # Global OD/concentration percentiles per stain (50th, 90th, 95th, 99th)
-    c_h_list, c_e_list = [], []
-    for tile in tiles:
-        try:
-            ch, ce = _get_concentrations_for_tile(tile, stain_matrix, normalizer.stain_extractor)
-            c_h_list.append(ch)
-            c_e_list.append(ce)
-        except TissueMaskException:
-            continue
-    if c_h_list and c_e_list:
-        c_h_all = np.concatenate(c_h_list)
-        c_e_all = np.concatenate(c_e_list)
-        od_percentiles = np.array(
-            [
-                [np.percentile(c_h_all, p) for p in OD_PERCENTILES],
-                [np.percentile(c_e_all, p) for p in OD_PERCENTILES],
-            ],
-            dtype=np.float64,
-        )
-    else:
-        od_percentiles = np.full((2, len(OD_PERCENTILES)), np.nan, dtype=np.float64)
-
-    return stain_matrix, maxCRef, od_percentiles
+    return stain_matrix, maxCRef
 
 
 

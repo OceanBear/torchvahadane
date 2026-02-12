@@ -1,10 +1,9 @@
 """
 Convert TorchVahadane WSI feature .npy files to human-readable JSON.
 
-This script expects per-WSI triplet of files:
+This script expects per-WSI paired files:
 - <stem>_stain_matrix.npy   (shape: 2x3)
 - <stem>_maxCRef.npy        (shape: 2,)
-- <stem>_od_percentiles.npy (shape: 2x4) – per-stain OD percentiles [p50,p90,p95,p99]
 
 It writes ONE combined JSON per WSI:
 - <stem>.json
@@ -22,24 +21,20 @@ import numpy as np
 
 STAIN_SUFFIX = "_stain_matrix.npy"
 MAXC_SUFFIX = "_maxCRef.npy"
-OD_SUFFIX = "_od_percentiles.npy"
-OD_PERCENTILES = (50, 90, 95, 99)
 
 
-def triplet_npy_to_json(
-    stain_path: Path, maxc_path: Path, od_path: Path, output_path: Path
+def paired_npy_to_json(
+    stain_path: Path, maxc_path: Path, output_path: Path
 ) -> None:
-    """Load the three feature .npy files and save a combined JSON."""
+    """Load paired feature .npy files and save a combined JSON."""
     stain_matrix = np.load(stain_path)
     maxCRef = np.load(maxc_path)
-    od_arr = np.load(od_path)
 
     data = {
         "wsi_stem": stain_path.name[: -len(STAIN_SUFFIX)],
         "files": {
             "stain_matrix": stain_path.name,
             "maxCRef": maxc_path.name,
-            "od_percentiles": od_path.name,
         },
         "stain_matrix": {
             "shape": list(stain_matrix.shape),
@@ -49,13 +44,6 @@ def triplet_npy_to_json(
             "shape": list(maxCRef.shape),
             "values": maxCRef.tolist(),
         },
-        "od_percentiles": {
-            "description": "Per-stain optical density percentiles (rows: H,E; cols: p50,p90,p95,p99)",
-            "shape": list(od_arr.shape),
-            "percentiles": list(OD_PERCENTILES),
-            "H": {str(p): float(od_arr[0, i]) for i, p in enumerate(OD_PERCENTILES)},
-            "E": {str(p): float(od_arr[1, i]) for i, p in enumerate(OD_PERCENTILES)},
-        },
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,7 +52,7 @@ def triplet_npy_to_json(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert triplet of WSI feature .npy files to JSON.")
+    parser = argparse.ArgumentParser(description="Convert paired WSI feature .npy files to JSON.")
     parser.add_argument(
         "--input_dir",
         type=str,
@@ -94,24 +82,22 @@ def main() -> None:
     for stain_path in stain_files:
         stem = stain_path.name[: -len(STAIN_SUFFIX)]
         maxc_path = input_dir / f"{stem}{MAXC_SUFFIX}"
-        od_path = input_dir / f"{stem}{OD_SUFFIX}"
-        if not maxc_path.exists() or not od_path.exists():
+        if not maxc_path.exists():
             missing.append(stem)
             continue
 
         json_path = output_dir / f"{stem}.json"
-        triplet_npy_to_json(stain_path, maxc_path, od_path, json_path)
+        paired_npy_to_json(stain_path, maxc_path, json_path)
         converted += 1
-        print(f"Converted {stain_path.name} + {maxc_path.name} + {od_path.name} -> {json_path}")
+        print(f"Converted {stain_path.name} + {maxc_path.name} -> {json_path}")
 
     if missing:
         print(
-            f"\nWarning: {len(missing)} WSI(s) missing one or more of maxCRef/od_percentiles. "
-            "Skipped."
+            f"\nWarning: {len(missing)} WSI(s) missing '{MAXC_SUFFIX}'. Skipped."
         )
 
     if converted == 0:
-        raise RuntimeError("No complete WSI feature triplets were converted.")
+        raise RuntimeError("No paired WSI feature files were converted.")
 
 
 if __name__ == "__main__":
