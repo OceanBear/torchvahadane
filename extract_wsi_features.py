@@ -93,7 +93,7 @@ def extract_stain_feature_for_wsi(
 
     t0 = time.perf_counter()
     normalizer = TorchVahadaneNormalizer(device=device)
-    stain_matrix, maxCRef, od_percentiles = estimate_median_matrix_and_maxC(
+    stain_matrix, maxCRef = estimate_median_matrix_and_maxC(
         osh,
         normalizer,
         osh_level=osh_level,
@@ -107,15 +107,12 @@ def extract_stain_feature_for_wsi(
     stem = wsi_path.stem
     stain_path = output_dir / (stem + "_stain_matrix.npy")
     maxC_path = output_dir / (stem + "_maxCRef.npy")
-    od_path = output_dir / (stem + "_od_percentiles.npy")
     np.save(stain_path, stain_matrix)
     np.save(maxC_path, maxCRef)
-    np.save(od_path, od_percentiles)
 
     print(f"  Estimation time: {t1 - t0:.2f} s")
     print(f"  Saved stain matrix to: {stain_path} (shape={stain_matrix.shape})")
     print(f"  Saved maxCRef to: {maxC_path} (shape={maxCRef.shape})")
-    print(f"  Saved OD percentiles to: {od_path} (shape={od_percentiles.shape}, p50/90/95/99 per H,E)")
     return stain_path
 
 
@@ -151,15 +148,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--osh_level",
         type=int,
-        required=False,
-        default=0,
+        required=False, # resolution level, 0 for full resolution
+        default=2,
         help="Openslide level to use for stain estimation (default: 0).",
     )
     parser.add_argument(
         "--tile_size",
         type=int,
         required=False,
-        default=4096,   # was 4096
+        default=2048,   # was 4096
         help="Tile size used in the grid search for stain estimation (default: 4096).",
     )
     parser.add_argument(
@@ -173,7 +170,7 @@ def parse_args() -> argparse.Namespace:
         "--subsample_fraction",
         type=float,
         required=False,
-        default=0.5,    # was 0.5
+        default=0.3,    # was 0.5
         help="Fraction of tissue-passing tiles to keep, e.g. 0.5 for 50pct, 0.3 for 30pct (default: 1.0 = no subsampling).",
     )
     parser.add_argument(
@@ -208,15 +205,14 @@ def main() -> None:
         print(f"torch.cuda.is_available(): {torch.cuda.is_available()}")
 
     for wsi_path in wsi_files:
-        # Skip if this WSI already has saved stain matrix, maxCRef, and od_percentiles
+        # Skip if this WSI already has saved stain matrix and maxCRef
         stem = wsi_path.stem
         stain_path = output_dir / (stem + "_stain_matrix.npy")
         maxC_path = output_dir / (stem + "_maxCRef.npy")
-        od_path = output_dir / (stem + "_od_percentiles.npy")
-        if stain_path.exists() and maxC_path.exists() and od_path.exists():
+        if stain_path.exists() and maxC_path.exists():
             print(
                 f"\nSkipping WSI (already processed): {wsi_path}\n"
-                f"  Existing: {stain_path.name}, {maxC_path.name}, {od_path.name}"
+                f"  Existing: {stain_path.name}, {maxC_path.name}"
             )
             continue
 

@@ -2,8 +2,7 @@
   "wsi_stem": "ref_image",
   "files": {
     "stain_matrix": "ref_image_stain_matrix.npy",
-    "maxCRef": "ref_image_maxCRef.npy",
-    "od_percentiles": "ref_image_od_percentiles.npy"
+    "maxCRef": "ref_image_maxCRef.npy"
   },
   "stain_matrix": {
     "shape": [
@@ -31,30 +30,5 @@
       2.9286754318378883,
       1.1678004323740931
     ]
-  },
-  "od_percentiles": {
-    "description": "Per-stain optical density percentiles (rows: H,E; cols: p50,p90,p95,p99)",
-    "shape": [
-      2,
-      4
-    ],
-    "percentiles": [
-      50,
-      90,
-      95,
-      99
-    ],
-    "H": {
-      "50": 0.24059646062128376,
-      "90": 1.3794422531277513,
-      "95": 1.9248907944502731,
-      "99": 2.993003587667408
-    },
-    "E": {
-      "50": 0.714142558782763,
-      "90": 0.9638063586529197,
-      "95": 1.0306205502185573,
-      "99": 1.1727408900707226
-    }
   }
 }
