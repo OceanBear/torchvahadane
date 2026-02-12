@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
 Stain-normalize H&E tiles using a reference image.
-Follows the NucSegAI / StainTools pattern:
-  - Luminosity-standardize reference and each tile before Vahadane.
-  - Fit normalizer on standardized reference, transform standardized tiles.
-  - No histogram/exposure correction (Vahadane only).
-
 Reference: ref_image/
 Raw tiles: /mnt/d/Downloads/Programs/original_tiles (WSL path for D:\Downloads\Programs\original_tiles)
 Output: saved to an output directory (default: normalized_tiles in project, or under the same WSL tree).
@@ -14,7 +9,6 @@ Output: saved to an output directory (default: normalized_tiles in project, or u
 from pathlib import Path
 
 import cv2
-import numpy as np
 import torch
 from torchvahadane import TorchVahadaneNormalizer
 
@@ -33,25 +27,6 @@ OUTPUT_DIR = Path("/mnt/d/Downloads/Programs/normalized_tiles")  # or use projec
 
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
-
-
-def luminosity_standardize(I: np.ndarray, percentile: int = 95) -> np.ndarray:
-    """
-    Standardize image brightness (same logic as StainTools LuminosityStandardizer).
-    Modifies the L channel so that the given percentile is saturated.
-
-    :param I: RGB uint8 image (H, W, 3).
-    :param percentile: Percentile for luminosity saturation (default 95).
-    :return: RGB uint8 image with standardized brightness.
-    """
-    assert I.dtype == np.uint8 and I.ndim == 3 and I.shape[2] == 3, "Image should be RGB uint8."
-    I_LAB = cv2.cvtColor(I, cv2.COLOR_RGB2LAB)
-    L_float = I_LAB[:, :, 0].astype(np.float64)
-    p = np.percentile(L_float, percentile)
-    if p <= 0:
-        return I
-    I_LAB[:, :, 0] = np.clip(255.0 * L_float / p, 0, 255).astype(np.uint8)
-    return cv2.cvtColor(I_LAB, cv2.COLOR_LAB2RGB)
 
 
 def find_reference_image(ref_dir: Path) -> Path:
@@ -87,6 +62,7 @@ def main():
     ref = cv2.imread(str(ref_path))
     if ref is None:
         from PIL import Image
+        import numpy as np
         pil_img = np.array(Image.open(ref_path))
         if pil_img.ndim == 2:
             ref = cv2.cvtColor(pil_img, cv2.COLOR_GRAY2RGB)
@@ -97,33 +73,26 @@ def main():
     else:
         ref = cv2.cvtColor(ref, cv2.COLOR_BGR2RGB)
 
-    # NucSegAI pattern: standardize luminosity on reference before fit
-    ref = luminosity_standardize(ref)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
-    # Vahadane only, no histogram matching (match NucSegAI / StainTools pipeline)
-    normalizer = TorchVahadaneNormalizer(device=device, staintools_estimate=STAINTOOLS_ESTIMATE, correct_exposure=False)
+    normalizer = TorchVahadaneNormalizer(device=device, staintools_estimate=STAINTOOLS_ESTIMATE, correct_exposure=True)
     normalizer.fit(ref)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {OUTPUT_DIR}")
 
     for i, path in enumerate(tile_paths):
-        out_path = OUTPUT_DIR / path.name
-        if out_path.exists():
-            print(f"  {path.name} has been processed, skipping")
-            continue
         tile = cv2.imread(str(path))
         if tile is None:
             print(f"  Skip (unreadable): {path.name}")
             continue
         tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
-        # NucSegAI pattern: standardize luminosity on each tile before transform
-        tile_std = luminosity_standardize(tile_rgb)
-        normed = normalizer.transform(tile_std)
+        normed = normalizer.transform(tile_rgb)
         out_arr = normed.cpu().numpy() if hasattr(normed, "cpu") else normed
-        cv2.imwrite(str(out_path), cv2.cvtColor(out_arr.astype(np.uint8), cv2.COLOR_RGB2BGR))
-        print(f"  {i + 1}/{len(tile_paths)}: {path.name} -> {out_path.name}")
+        out_path = OUTPUT_DIR / path.name
+        cv2.imwrite(str(out_path), cv2.cvtColor(out_arr, cv2.COLOR_RGB2BGR))
+        if (i + 1) % 50 == 0 or i == 0:
+            print(f"  {i + 1}/{len(tile_paths)}: {path.name} -> {out_path.name}")
 
     print(f"Done. Normalized {len(tile_paths)} tiles -> {OUTPUT_DIR}")
 

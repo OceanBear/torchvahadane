@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 Stain-normalize H&E tiles using a reference image.
-Follows the NucSegAI / StainTools pattern:
-  - Luminosity-standardize reference and each tile before Vahadane.
-  - Fit normalizer on standardized reference, transform standardized tiles.
-  - No histogram/exposure correction (Vahadane only).
+Follows the NucSegAI stain_norm_new pattern:
+  - Tissue-only brightness standardization (scale only tissue pixels; blank regions unchanged).
+  - Vahadane normalization on standardized reference and tiles.
 
 Reference: ref_image/
 Raw tiles: /mnt/d/Downloads/Programs/original_tiles (WSL path for D:\Downloads\Programs\original_tiles)
@@ -31,27 +30,56 @@ REF_IMAGE_DIR = Path(__file__).resolve().parent / "ref_image"
 RAW_TILES_DIR = Path("/mnt/d/Downloads/Programs/original_tiles")
 OUTPUT_DIR = Path("/mnt/d/Downloads/Programs/normalized_tiles")  # or use project: Path(__file__).parent / "normalized_tiles"
 
+# Configuration (match stain_norm_new.py)
+LUMINANCE_PERCENTILE = 95.0  # Percentile for tissue luminance (90.0, 95.0, 99.0). Lower = more aggressive.
+
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 
 
-def luminosity_standardize(I: np.ndarray, percentile: int = 95) -> np.ndarray:
+def tissue_only_brightness_standardize(
+    img: np.ndarray,
+    white_threshold: float = 0.9,
+    target_p95: float = 0.9,
+    min_scale: float = 0.5,
+    max_scale: float = 2.0,
+    luminance_percentile: float = 95.0,
+) -> np.ndarray:
     """
-    Standardize image brightness (same logic as StainTools LuminosityStandardizer).
-    Modifies the L channel so that the given percentile is saturated.
+    Standardize brightness using only non-blank (tissue) pixels.
+    Blank pixels (luminance >= white_threshold) are left unchanged so tiles with
+    large white regions are not over-darkened.
 
-    :param I: RGB uint8 image (H, W, 3).
-    :param percentile: Percentile for luminosity saturation (default 95).
+    :param img: RGB uint8 image (H, W, 3).
+    :param white_threshold: Luminance above this is treated as blank (default 0.9).
+    :param target_p95: Target luminance percentile value after scaling (default 0.9).
+    :param min_scale: Minimum scale factor (default 0.5).
+    :param max_scale: Maximum scale factor (default 2.0).
+    :param luminance_percentile: Percentile for tissue luminance (default 95.0).
     :return: RGB uint8 image with standardized brightness.
     """
-    assert I.dtype == np.uint8 and I.ndim == 3 and I.shape[2] == 3, "Image should be RGB uint8."
-    I_LAB = cv2.cvtColor(I, cv2.COLOR_RGB2LAB)
-    L_float = I_LAB[:, :, 0].astype(np.float64)
-    p = np.percentile(L_float, percentile)
-    if p <= 0:
-        return I
-    I_LAB[:, :, 0] = np.clip(255.0 * L_float / p, 0, 255).astype(np.uint8)
-    return cv2.cvtColor(I_LAB, cv2.COLOR_LAB2RGB)
+    if img.ndim != 3 or img.shape[2] != 3:
+        return img
+
+    img_float = img.astype(np.float32) / 255.0
+    r, g, b = img_float[..., 0], img_float[..., 1], img_float[..., 2]
+    lum = 0.2126 * r + 0.7152 * g + 0.0722 * b  # Rec. 709
+
+    tissue_mask = lum < white_threshold
+    if not np.any(tissue_mask):
+        return img
+
+    tissue_luminance_p = np.percentile(lum[tissue_mask], luminance_percentile)
+    if tissue_luminance_p <= 0:
+        return img
+
+    scale = target_p95 / tissue_luminance_p
+    scale = float(np.clip(scale, min_scale, max_scale))
+
+    out = img_float.copy()
+    out[tissue_mask] *= scale
+    out = np.clip(out, 0.0, 1.0)
+    return (out * 255.0).astype(img.dtype)
 
 
 def find_reference_image(ref_dir: Path) -> Path:
@@ -97,11 +125,10 @@ def main():
     else:
         ref = cv2.cvtColor(ref, cv2.COLOR_BGR2RGB)
 
-    # NucSegAI pattern: standardize luminosity on reference before fit
-    ref = luminosity_standardize(ref)
+    # Tissue-only brightness standardization (stain_norm_new pattern)
+    ref = tissue_only_brightness_standardize(ref, luminance_percentile=LUMINANCE_PERCENTILE)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
-    # Vahadane only, no histogram matching (match NucSegAI / StainTools pipeline)
     normalizer = TorchVahadaneNormalizer(device=device, staintools_estimate=STAINTOOLS_ESTIMATE, correct_exposure=False)
     normalizer.fit(ref)
 
@@ -118,11 +145,11 @@ def main():
             print(f"  Skip (unreadable): {path.name}")
             continue
         tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
-        # NucSegAI pattern: standardize luminosity on each tile before transform
-        tile_std = luminosity_standardize(tile_rgb)
+        tile_std = tissue_only_brightness_standardize(tile_rgb, luminance_percentile=LUMINANCE_PERCENTILE)
         normed = normalizer.transform(tile_std)
         out_arr = normed.cpu().numpy() if hasattr(normed, "cpu") else normed
-        cv2.imwrite(str(out_path), cv2.cvtColor(out_arr.astype(np.uint8), cv2.COLOR_RGB2BGR))
+        out_arr = out_arr.astype(np.uint8)
+        cv2.imwrite(str(out_path), cv2.cvtColor(out_arr, cv2.COLOR_RGB2BGR))
         print(f"  {i + 1}/{len(tile_paths)}: {path.name} -> {out_path.name}")
 
     print(f"Done. Normalized {len(tile_paths)} tiles -> {OUTPUT_DIR}")
