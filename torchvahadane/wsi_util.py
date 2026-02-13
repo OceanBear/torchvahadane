@@ -113,12 +113,14 @@ def estimate_median_matrix_and_maxC(
     percentile=99,
     subsample_fraction=1.0,
     subsample_seed=42,
+    max_tiles=None,
 ):
     """Estimate median stain matrix and median max concentrations (maxCRef) from WSI tiles.
 
-    Returns (stain_matrix, maxCRef) where:
+    Returns (stain_matrix, maxCRef, tile_info) where:
     - stain_matrix: 2x3 array (rows=H,E; cols=RGB), compatible with TorchVahadane
     - maxCRef: 1d array of shape (2,), [maxC_H, maxC_E], compatible with Macenko-style normalization
+    - tile_info: dict with n_after_tissue, n_after_subsample, n_final (tile counts)
 
     Parameters
     ----------
@@ -127,6 +129,9 @@ def estimate_median_matrix_and_maxC(
         Use 0.5 to keep 50%% of tiles, 0.3 for 30%%, etc. Speeds up processing.
     subsample_seed : int, default 42
         Random seed for subsampling (reproducible when subsample_fraction < 1.0).
+    max_tiles : int, optional
+        Maximum number of tiles to use. If subsampled count exceeds this, keep only max_tiles.
+        None = no limit.
     """
     global osh_
     osh_ = osh
@@ -155,12 +160,20 @@ def estimate_median_matrix_and_maxC(
             "Not enough tissue area found for calculating stains. Try lowering the tile_size"
         )
 
-    n_total = len(coords)
-    if subsample_fraction < 1.0 and n_total > 0:
-        n_keep = max(1, int(round(n_total * subsample_fraction)))
+    n_after_tissue = len(coords)
+    if subsample_fraction < 1.0 and n_after_tissue > 0:
+        n_keep = max(1, int(round(n_after_tissue * subsample_fraction)))
         rng = np.random.default_rng(subsample_seed)
-        indices = rng.choice(n_total, size=n_keep, replace=False)
+        indices = rng.choice(n_after_tissue, size=n_keep, replace=False)
         coords = [coords[i] for i in sorted(indices)]
+
+    n_after_subsample = len(coords)
+    if max_tiles is not None and n_after_subsample > max_tiles:
+        rng = np.random.default_rng(subsample_seed + 1)  # distinct seed for max_tiles cap
+        indices = rng.choice(n_after_subsample, size=max_tiles, replace=False)
+        coords = [coords[i] for i in sorted(indices)]
+
+    n_final = len(coords)
 
     with Pool(num_workers) as pool:
         tiles = list(pool.imap(partial(_run, osh_level=osh_level, tile_size=tile_size), coords, chunksize=1))
@@ -175,7 +188,12 @@ def estimate_median_matrix_and_maxC(
         np.median(stain_matrices, axis=0), axis=1
     )[:, None]
     maxCRef = np.median(maxCs, axis=0)
-    return stain_matrix, maxCRef
+    tile_info = {
+        "n_after_tissue": n_after_tissue,
+        "n_after_subsample": n_after_subsample,
+        "n_final": n_final,
+    }
+    return stain_matrix, maxCRef, tile_info
 
 
 
