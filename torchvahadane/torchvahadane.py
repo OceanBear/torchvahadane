@@ -79,7 +79,6 @@ class TorchVahadaneNormalizer():
         self.stain_m_fixed = _to_tensor(stain_matrix, self.device)
         # print(self.stain_m_fixed, 'set as transform matrix')
 
-
     def set_stain_matrix_from_img(self, I):
         """set fixed stain matrix for transformation based on image
 
