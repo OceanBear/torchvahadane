@@ -15,7 +15,8 @@ except ImportError:
 
 # Input directory containing TIFF tiles (WSL path for
 # J:\HandE\results\SOW1885_n=201_AT2 40X\JN_TS_test\original_tiles)
-INPUT_DIR = Path("/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_test/original_tiles")
+# /mnt/j/HandE/results/SOW1885_n=201_AT2 40X/Batch_105/pred/tiles_manual
+INPUT_DIR = Path("/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/std_output")
 
 # D65 reference white for XYZ
 _Xn, _Yn, _Zn = 0.95047, 1.0, 1.08883

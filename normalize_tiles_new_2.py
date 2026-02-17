@@ -10,6 +10,7 @@ Raw tiles: /mnt/d/Downloads/Programs/original_tiles (WSL path for D:\Downloads\P
 Output: saved to an output directory (default: normalized_tiles in project, or under the same WSL tree).
 """
 
+import argparse
 from pathlib import Path
 from typing import Dict
 
@@ -26,13 +27,12 @@ except ImportError:
     STAINTOOLS_ESTIMATE = False
     print("spams not found: using GPU stain extraction (staintools_estimate=False)")
 
-# Paths (WSL format for Windows D:\...)
-REF_IMAGE_DIR = Path(__file__).resolve().parent / "ref_image"
-RAW_TILES_DIR = Path("/mnt/d/Downloads/Programs/original_tiles")
-OUTPUT_DIR = Path("/mnt/d/Downloads/Programs/normalized_tiles")  # or use project: Path(__file__).parent / "normalized_tiles"
-
-# Directory containing precomputed per-WSI stain features from extract_wsi_features.py
-WSI_FEATURES_DIR = Path(__file__).resolve().parent / "wsi_features"
+# Default paths (overridable via CLI)
+SCRIPT_DIR = Path(__file__).resolve().parent
+REF_IMAGE_DIR = SCRIPT_DIR / "ref_image"
+RAW_TILES_DIR = SCRIPT_DIR / "original_tiles"  # default; override with --input
+OUTPUT_DIR = SCRIPT_DIR / "normalized_tiles"   # default; override with --output
+WSI_FEATURES_DIR = SCRIPT_DIR / "wsi_features"
 
 # Configuration: tissue brightness uses LAB L (same as stain_extractor_cpu/gpu)
 LUMINANCE_PERCENTILE = 95.0  # Percentile for tissue LAB L (90.0, 95.0, 99.0). Lower = more aggressive.
@@ -136,23 +136,57 @@ def find_reference_image(ref_dir: Path) -> Path:
     raise FileNotFoundError(f"No image found in {ref_dir}")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Stain-normalize H&E tiles using a reference image.")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=RAW_TILES_DIR,
+        help="Directory containing raw tile images (default: script dir / original_tiles)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_DIR,
+        help="Directory for normalized output images (default: script dir / normalized_tiles)",
+    )
+    parser.add_argument(
+        "--ref-dir",
+        type=Path,
+        default=REF_IMAGE_DIR,
+        help="Directory containing the reference image (default: script dir / ref_image)",
+    )
+    parser.add_argument(
+        "--wsi-features",
+        type=Path,
+        default=WSI_FEATURES_DIR,
+        help="Directory with per-WSI stain matrices from extract_wsi_features.py (default: script dir / wsi_features)",
+    )
+    return parser.parse_args()
+
+
 def main():
-    ref_path = find_reference_image(REF_IMAGE_DIR)
+    args = parse_args()
+    raw_tiles_dir = args.input
+    output_dir = args.output
+    ref_image_dir = args.ref_dir
+    wsi_features_dir = args.wsi_features
+
+    ref_path = find_reference_image(ref_image_dir)
     print(f"Reference image: {ref_path}")
 
-    if not RAW_TILES_DIR.exists():
+    if not raw_tiles_dir.exists():
         raise FileNotFoundError(
-            f"Raw tiles directory not found: {RAW_TILES_DIR}\n"
-            "Ensure the Windows path D:\\Downloads\\Programs\\original_tiles is accessible in WSL."
+            f"Raw tiles directory not found: {raw_tiles_dir}"
         )
 
     tile_paths = [
         p
-        for p in RAW_TILES_DIR.iterdir()
+        for p in raw_tiles_dir.iterdir()
         if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
     ]
     if not tile_paths:
-        raise FileNotFoundError(f"No image files found in {RAW_TILES_DIR}")
+        raise FileNotFoundError(f"No image files found in {raw_tiles_dir}")
 
     print(f"Found {len(tile_paths)} tiles. Fitting normalizer on reference...")
 
@@ -184,19 +218,19 @@ def main():
     # (stain_matrix_target and maxC_target).
     normalizer.fit(ref)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Output directory: {OUTPUT_DIR}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output directory: {output_dir}")
 
     # Known WSI IDs from wsi_features (prefix match for tile names).
-    known_wsi_ids = get_known_wsi_ids(WSI_FEATURES_DIR)
+    known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
     if known_wsi_ids:
-        print(f"Known WSI IDs from {WSI_FEATURES_DIR}: {sorted(known_wsi_ids)}")
+        print(f"Known WSI IDs from {wsi_features_dir}: {sorted(known_wsi_ids)}")
 
     # Cache of per-WSI stain matrices so we only load each once.
     wsi_stain_cache: Dict[str, np.ndarray] = {}
 
     for i, path in enumerate(tile_paths):
-        out_path = OUTPUT_DIR / path.name
+        out_path = output_dir / path.name
         if out_path.exists():
             print(f"  {path.name} has been processed, skipping")
             continue
@@ -217,7 +251,7 @@ def main():
             if wsi_id in wsi_stain_cache:
                 stain_matrix = wsi_stain_cache[wsi_id]
             else:
-                stain_path = WSI_FEATURES_DIR / f"{wsi_id}_stain_matrix.npy"
+                stain_path = wsi_features_dir / f"{wsi_id}_stain_matrix.npy"
                 if stain_path.exists():
                     try:
                         stain_matrix = np.load(stain_path)
@@ -247,7 +281,7 @@ def main():
         cv2.imwrite(str(out_path), cv2.cvtColor(out_arr, cv2.COLOR_RGB2BGR))
         print(f"  {i + 1}/{len(tile_paths)}: {path.name} -> {out_path.name}")
 
-    print(f"Done. Normalized {len(tile_paths)} tiles -> {OUTPUT_DIR}")
+    print(f"Done. Normalized {len(tile_paths)} tiles -> {output_dir}")
 
 
 if __name__ == "__main__":
