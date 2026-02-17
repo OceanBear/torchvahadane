@@ -208,8 +208,8 @@ def parse_args() -> argparse.Namespace:
         "--subsample_fraction",
         type=float,
         required=False,
-        default=0.3,    # was 0.5
-        help="Fraction of tissue-passing tiles to keep, e.g. 0.5 for 50pct, 0.3 for 30pct (default: 1.0 = no subsampling).",
+        default=1.0,
+        help="Optional fraction of tissue-passing tiles to keep before max_tiles cap, e.g. 0.5 for 50pct (default: 1.0 = no subsampling).",
     )
     parser.add_argument(
         "--subsample_seed",
