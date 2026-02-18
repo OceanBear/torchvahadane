@@ -37,6 +37,11 @@ WSI_FEATURES_DIR = SCRIPT_DIR / "wsi_features"
 # Configuration: tissue brightness uses LAB L (same as stain_extractor_cpu/gpu)
 LUMINANCE_PERCENTILE = 95.0  # Percentile for tissue LAB L (90.0, 95.0, 99.0). Lower = more aggressive.
 
+# Configuration: black artifact detection (carbon dots, pollution, etc.)
+BLACK_ARTIFACT_THRESHOLD = 15  # Grayscale threshold (0-255): pixels darker than this are candidates
+BLACK_ARTIFACT_MAX_AREA = 50  # Maximum area (pixels) for a blob to be considered an artifact
+BLACK_ARTIFACT_ENABLED = True  # Set to False to disable artifact filtering
+
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 
@@ -88,6 +93,70 @@ def tissue_only_brightness_standardize(
     out[tissue_mask] *= scale
     out = np.clip(out, 0.0, 1.0)
     return (out * 255.0).astype(img.dtype)
+
+
+def detect_black_artifact_mask(
+    img: np.ndarray,
+    threshold: int = 15,
+    max_area: int = 50,
+) -> np.ndarray:
+    """
+    Detect small, very dark artifact dots (carbon, pollution, etc.) that should be excluded
+    from normalization to prevent them from turning purple and being misidentified as nuclei.
+
+    Uses connected component analysis to find small, isolated dark blobs.
+
+    :param img: RGB uint8 image (H, W, 3).
+    :param threshold: Grayscale threshold (0-255). Pixels darker than this are candidates (default 15).
+    :param max_area: Maximum area in pixels for a blob to be considered an artifact (default 50).
+    :return: Boolean mask where True indicates artifact pixels that should be excluded.
+    """
+    if img.ndim != 3 or img.shape[2] != 3:
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    # Find very dark pixels (candidates for artifacts)
+    dark_mask = gray < threshold
+
+    if not np.any(dark_mask):
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    # Find connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        dark_mask.astype(np.uint8), connectivity=8
+    )
+
+    # Build artifact mask: keep only small components
+    artifact_mask = np.zeros(img.shape[:2], dtype=bool)
+    for label_id in range(1, num_labels):  # Skip label 0 (background)
+        area = stats[label_id, cv2.CC_STAT_AREA]
+        if area <= max_area:
+            artifact_mask[labels == label_id] = True
+
+    return artifact_mask
+
+
+def remove_black_artifacts(
+    img: np.ndarray,
+    artifact_mask: np.ndarray,
+    replacement_color: tuple[int, int, int] = (255, 255, 255),
+) -> np.ndarray:
+    """
+    Replace artifact pixels with background-like color to prevent them from being normalized.
+
+    :param img: RGB uint8 image (H, W, 3).
+    :param artifact_mask: Boolean mask where True indicates artifact pixels.
+    :param replacement_color: RGB color to use for artifacts (default: white).
+    :return: Image with artifacts replaced.
+    """
+    if not np.any(artifact_mask):
+        return img
+
+    out = img.copy()
+    out[artifact_mask] = replacement_color
+    return out
 
 
 def get_known_wsi_ids(wsi_features_dir: Path) -> set[str]:
@@ -162,6 +231,23 @@ def parse_args():
         default=WSI_FEATURES_DIR,
         help="Directory with per-WSI stain matrices from extract_wsi_features.py (default: script dir / wsi_features)",
     )
+    parser.add_argument(
+        "--black-artifact-threshold",
+        type=int,
+        default=BLACK_ARTIFACT_THRESHOLD,
+        help=f"Grayscale threshold (0-255) for detecting black artifacts. Pixels darker than this are candidates (default: {BLACK_ARTIFACT_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--black-artifact-max-area",
+        type=int,
+        default=BLACK_ARTIFACT_MAX_AREA,
+        help=f"Maximum area (pixels) for a blob to be considered an artifact (default: {BLACK_ARTIFACT_MAX_AREA}).",
+    )
+    parser.add_argument(
+        "--disable-black-artifact-filter",
+        action="store_true",
+        help="Disable black artifact filtering (artifacts will be normalized normally).",
+    )
     return parser.parse_args()
 
 
@@ -220,6 +306,10 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
+    if not args.disable_black_artifact_filter:
+        print(f"Black artifact filter: enabled (threshold={args.black_artifact_threshold}, max_area={args.black_artifact_max_area})")
+    else:
+        print("Black artifact filter: disabled")
 
     # Known WSI IDs from wsi_features (prefix match for tile names).
     known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
@@ -239,6 +329,19 @@ def main():
             print(f"  Skip (unreadable): {path.name}")
             continue
         tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+
+        # Detect and remove black artifacts (carbon dots, pollution, etc.) before normalization
+        # to prevent them from turning purple and being misidentified as nuclei.
+        if not args.disable_black_artifact_filter:
+            artifact_mask = detect_black_artifact_mask(
+                tile_rgb,
+                threshold=args.black_artifact_threshold,
+                max_area=args.black_artifact_max_area,
+            )
+            if np.any(artifact_mask):
+                n_artifacts = np.sum(artifact_mask)
+                tile_rgb = remove_black_artifacts(tile_rgb, artifact_mask)
+                print(f"    Removed {n_artifacts} black artifact pixels")
 
         # Use the precomputed WSI-level stain matrix (from extract_wsi_features.py)
         # to describe how the source slide is stained, while still mapping to the
