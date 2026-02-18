@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Run stain normalization with NucSegAI sample images.
-# Input:  /scratch/st-kenfield-1/repos/NucSegAI/sample_images
+# Input:  /scratch/st-kenfield-1/repos/NucSegAI/sample_images2
 # Output: /scratch/st-kenfield-1/repos/NucSegAI/std_output2
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/sample_images"
-OUTPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/std_output2"
+INPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/sample_images3"
+OUTPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/std_output3"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles_new_2.py \
