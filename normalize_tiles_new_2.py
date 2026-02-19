@@ -39,11 +39,14 @@ LUMINANCE_PERCENTILE = 95.0  # Percentile for tissue LAB L (90.0, 95.0, 99.0). L
 
 # Configuration: black artifact detection (carbon dots, pollution, etc.)
 # Stage 1: grayscale filter – focus on dark pixels only.
-# Stage 2: chroma filter – among dark pixels, low chroma = artifact (achromatic), high chroma = dark nuclei (keep).
+# Stage 2: among dark pixels, require ALL of (chroma, V, rgb_std) low = artifact; else keep (e.g. dark nuclei).
+# Thresholds from blob_nuclei_features.json: artifacts chroma 2–10.6, V 0.06–0.16, rgb_std 1.9–7.6; nuclei higher.
 GRAYSCALE_DARK_THRESHOLD = 35   # Grayscale (0-255): pixels darker than this enter stage 2
-CHROMA_ARTIFACT_THRESHOLD = 20  # LAB chroma: below this = artifact (artifacts ~4, nuclei ~37 from blob_nuclei_features.json)
-BLACK_ARTIFACT_MAX_AREA = None  # Max blob area in pixels; None = no limit (remove all dark+achromatic regions)
-BLACK_ARTIFACT_ENABLED = True   # Set to False to disable artifact filtering
+CHROMA_ARTIFACT_THRESHOLD = 20   # LAB chroma: below this = artifact (artifacts ~4, nuclei ~37)
+V_ARTIFACT_THRESHOLD = 0.20      # HSV V (0-1): below this = artifact (artifacts 99th ~0.16, nuclei 1st ~0.23)
+RGB_STD_ARTIFACT_THRESHOLD = 12.0  # Per-pixel RGB std: below this = artifact (artifacts 99th ~7.6, nuclei 1st ~14.7)
+BLACK_ARTIFACT_MAX_AREA = None   # Max blob area in pixels; None = no limit (remove all dark+achromatic regions)
+BLACK_ARTIFACT_ENABLED = True    # Set to False to disable artifact filtering
 
 # Configuration: RBC (red blood cell) detection and removal
 # Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
@@ -114,6 +117,8 @@ def detect_black_artifact_mask(
     img: np.ndarray,
     grayscale_threshold: int = 35,
     chroma_threshold: float = 20.0,
+    v_threshold: float = 0.20,
+    rgb_std_threshold: float = 12.0,
     max_area: int | None = None,
 ) -> np.ndarray:
     """
@@ -122,13 +127,15 @@ def detect_black_artifact_mask(
 
     Two-stage filter:
       1. Grayscale: keep only dark pixels (grayscale < grayscale_threshold).
-      2. Chroma: among dark pixels, low chroma = achromatic = artifact; high chroma = dark purple nuclei = keep.
+      2. Among dark pixels, require ALL of (chroma, V, rgb_std) below thresholds = artifact; else keep.
 
     Optionally, connected-component max_area can limit removal to small blobs only.
 
     :param img: RGB uint8 image (H, W, 3).
     :param grayscale_threshold: Grayscale (0-255). Darker pixels enter stage 2 (default 35).
     :param chroma_threshold: LAB chroma. Below this = artifact (default 20).
+    :param v_threshold: HSV V (0-1). Below this = artifact (default 0.20).
+    :param rgb_std_threshold: Per-pixel RGB std. Below this = artifact (default 12.0).
     :param max_area: Max blob area in pixels; None = no limit (default None).
     :return: Boolean mask where True indicates artifact pixels to exclude.
     """
@@ -142,15 +149,22 @@ def detect_black_artifact_mask(
     if not np.any(dark_mask):
         return np.zeros(img.shape[:2], dtype=bool)
 
-    # Stage 2: chroma – among dark pixels, low chroma = artifact (achromatic)
+    # Stage 2: among dark pixels, require chroma AND V AND rgb_std all low = artifact
     lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
-    # OpenCV LAB: L 0-255, a/b 0-255 with 128 as neutral
     a = lab[:, :, 1].astype(np.float64) - 128.0
     b = lab[:, :, 2].astype(np.float64) - 128.0
     chroma = np.sqrt(a * a + b * b)
     chroma_low = chroma < chroma_threshold
 
-    artifact_candidate = dark_mask & chroma_low
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    v = hsv[:, :, 2].astype(np.float64) / 255.0  # 0-1
+    v_low = v < v_threshold
+
+    r, g, b_ch = img[:, :, 0].astype(np.float64), img[:, :, 1].astype(np.float64), img[:, :, 2].astype(np.float64)
+    rgb_std = np.std(np.stack([r, g, b_ch], axis=2), axis=2)
+    rgb_std_low = rgb_std < rgb_std_threshold
+
+    artifact_candidate = dark_mask & chroma_low & v_low & rgb_std_low
 
     if not np.any(artifact_candidate):
         return np.zeros(img.shape[:2], dtype=bool)
@@ -373,6 +387,18 @@ def parse_args():
         help=f"Stage 2: LAB chroma. Among dark pixels, below this = artifact (default: {CHROMA_ARTIFACT_THRESHOLD}).",
     )
     parser.add_argument(
+        "--v-artifact-threshold",
+        type=float,
+        default=V_ARTIFACT_THRESHOLD,
+        help=f"Stage 2: HSV V (0-1). Among dark pixels, below this = artifact (default: {V_ARTIFACT_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--rgb-std-artifact-threshold",
+        type=float,
+        default=RGB_STD_ARTIFACT_THRESHOLD,
+        help=f"Stage 2: per-pixel RGB std. Among dark pixels, below this = artifact (default: {RGB_STD_ARTIFACT_THRESHOLD}).",
+    )
+    parser.add_argument(
         "--black-artifact-max-area",
         type=int,
         default=BLACK_ARTIFACT_MAX_AREA,
@@ -483,7 +509,7 @@ def main():
     if not args.disable_black_artifact_filter:
         area_str = str(args.black_artifact_max_area) if args.black_artifact_max_area else "no limit"
         print(
-            f"Black artifact filter: enabled (grayscale<{args.grayscale_dark_threshold}, chroma<{args.chroma_artifact_threshold}, max_area={area_str})"
+            f"Black artifact filter: enabled (grayscale<{args.grayscale_dark_threshold}, chroma<{args.chroma_artifact_threshold}, V<{args.v_artifact_threshold}, rgb_std<{args.rgb_std_artifact_threshold}, max_area={area_str})"
         )
     else:
         print("Black artifact filter: disabled")
@@ -523,6 +549,8 @@ def main():
                 tile_rgb,
                 grayscale_threshold=args.grayscale_dark_threshold,
                 chroma_threshold=args.chroma_artifact_threshold,
+                v_threshold=args.v_artifact_threshold,
+                rgb_std_threshold=args.rgb_std_artifact_threshold,
                 max_area=args.black_artifact_max_area,
             )
             if np.any(artifact_mask):
