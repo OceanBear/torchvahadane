@@ -6,8 +6,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/sample_images3"
-OUTPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/std_output3"
+INPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/sample_images2"
+OUTPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/std_output4"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles_new_2.py \

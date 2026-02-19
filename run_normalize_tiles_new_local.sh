@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_test/original_tiles"
-OUTPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_test/SCN_torch_v2"
+OUTPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_test/SCN_torch_v3"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles_new_2.py \

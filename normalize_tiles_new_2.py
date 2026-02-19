@@ -45,6 +45,14 @@ CHROMA_ARTIFACT_THRESHOLD = 20  # LAB chroma: below this = artifact (artifacts ~
 BLACK_ARTIFACT_MAX_AREA = None  # Max blob area in pixels; None = no limit (remove all dark+achromatic regions)
 BLACK_ARTIFACT_ENABLED = True   # Set to False to disable artifact filtering
 
+# Configuration: RBC (red blood cell) detection and removal
+# Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
+# Based on rbc_regular_features.json: RBC R_G_ratio 1.69-3.21, Regular 1.17-2.02 (no overlap).
+R_G_RATIO_THRESHOLD = 2.0       # Main factor: R/G ratio above this = RBC candidate
+R_B_RATIO_THRESHOLD = 1.45      # Subsidiary: R/B ratio above this supports RBC (default 1.45)
+R_DOMINANCE_THRESHOLD = 0.45    # Subsidiary: R/(R+G+B) above this supports RBC (default 0.45)
+RBC_ENABLED = True              # Set to False to disable RBC filtering
+
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 
@@ -179,6 +187,70 @@ def remove_black_artifacts(
     return out
 
 
+def detect_rbc_mask(
+    img: np.ndarray,
+    r_g_ratio_threshold: float = 2.0,
+    r_b_ratio_threshold: float = 1.45,
+    r_dominance_threshold: float = 0.45,
+) -> np.ndarray:
+    """
+    Detect red blood cells (RBCs) to exclude from normalization.
+    
+    Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
+    Based on rbc_regular_features.json analysis: RBCs have higher R/G, R/B, and R dominance.
+    
+    :param img: RGB uint8 image (H, W, 3).
+    :param r_g_ratio_threshold: Main factor: R/G ratio above this = RBC candidate (default 2.0).
+    :param r_b_ratio_threshold: Subsidiary: R/B ratio above this supports RBC (default 1.45).
+    :param r_dominance_threshold: Subsidiary: R/(R+G+B) above this supports RBC (default 0.45).
+    :return: Boolean mask where True indicates RBC pixels to exclude.
+    """
+    if img.ndim != 3 or img.shape[2] != 3:
+        return np.zeros(img.shape[:2], dtype=bool)
+    
+    R = img[:, :, 0].astype(np.float64)
+    G = img[:, :, 1].astype(np.float64)
+    B = img[:, :, 2].astype(np.float64)
+    
+    # Main factor: R/G ratio
+    r_g_ratio = np.where(G > 0, R / G, np.inf)
+    rbc_main = r_g_ratio > r_g_ratio_threshold
+    
+    if not np.any(rbc_main):
+        return np.zeros(img.shape[:2], dtype=bool)
+    
+    # Subsidiary factors: R/B ratio and R dominance
+    r_b_ratio = np.where(B > 0, R / B, np.inf)
+    r_dominance = R / (R + G + B + 1e-10)
+    
+    # Combine: main factor AND (at least one subsidiary factor)
+    rbc_subsidiary = (r_b_ratio > r_b_ratio_threshold) | (r_dominance > r_dominance_threshold)
+    rbc_mask = rbc_main & rbc_subsidiary
+    
+    return rbc_mask
+
+
+def remove_rbcs(
+    img: np.ndarray,
+    rbc_mask: np.ndarray,
+    replacement_color: tuple[int, int, int] = (255, 255, 255),
+) -> np.ndarray:
+    """
+    Replace RBC pixels with background-like color to prevent them from being normalized.
+
+    :param img: RGB uint8 image (H, W, 3).
+    :param rbc_mask: Boolean mask where True indicates RBC pixels.
+    :param replacement_color: RGB color to use for RBCs (default: white).
+    :return: Image with RBCs replaced.
+    """
+    if not np.any(rbc_mask):
+        return img
+
+    out = img.copy()
+    out[rbc_mask] = replacement_color
+    return out
+
+
 def get_known_wsi_ids(wsi_features_dir: Path) -> set[str]:
     """
     Collect WSI IDs from wsi_features by listing *_stain_matrix.npy files.
@@ -275,6 +347,29 @@ def parse_args():
         action="store_true",
         help="Disable black artifact filtering (artifacts will be normalized normally).",
     )
+    parser.add_argument(
+        "--r-g-ratio-threshold",
+        type=float,
+        default=R_G_RATIO_THRESHOLD,
+        help=f"RBC filter main factor: R/G ratio above this = RBC candidate (default: {R_G_RATIO_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--r-b-ratio-threshold",
+        type=float,
+        default=R_B_RATIO_THRESHOLD,
+        help=f"RBC filter subsidiary: R/B ratio above this supports RBC (default: {R_B_RATIO_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--r-dominance-threshold",
+        type=float,
+        default=R_DOMINANCE_THRESHOLD,
+        help=f"RBC filter subsidiary: R/(R+G+B) above this supports RBC (default: {R_DOMINANCE_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--disable-rbc-filter",
+        action="store_true",
+        help="Disable RBC filtering (RBCs will be normalized normally).",
+    )
     return parser.parse_args()
 
 
@@ -333,6 +428,8 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
+    
+    # Print filter status
     if not args.disable_black_artifact_filter:
         area_str = str(args.black_artifact_max_area) if args.black_artifact_max_area else "no limit"
         print(
@@ -340,6 +437,13 @@ def main():
         )
     else:
         print("Black artifact filter: disabled")
+    
+    if not args.disable_rbc_filter:
+        print(
+            f"RBC filter: enabled (R/G>{args.r_g_ratio_threshold}, R/B>{args.r_b_ratio_threshold} OR R_dom>{args.r_dominance_threshold})"
+        )
+    else:
+        print("RBC filter: disabled")
 
     # Known WSI IDs from wsi_features (prefix match for tile names).
     known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
@@ -373,6 +477,20 @@ def main():
                 n_artifacts = np.sum(artifact_mask)
                 tile_rgb = remove_black_artifacts(tile_rgb, artifact_mask)
                 print(f"    Removed {n_artifacts} black artifact pixels")
+        
+        # Detect and remove RBCs (red blood cells) before normalization.
+        # Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
+        if not args.disable_rbc_filter:
+            rbc_mask = detect_rbc_mask(
+                tile_rgb,
+                r_g_ratio_threshold=args.r_g_ratio_threshold,
+                r_b_ratio_threshold=args.r_b_ratio_threshold,
+                r_dominance_threshold=args.r_dominance_threshold,
+            )
+            if np.any(rbc_mask):
+                n_rbcs = np.sum(rbc_mask)
+                tile_rgb = remove_rbcs(tile_rgb, rbc_mask)
+                print(f"    Removed {n_rbcs} RBC pixels")
 
         # Use the precomputed WSI-level stain matrix (from extract_wsi_features.py)
         # to describe how the source slide is stained, while still mapping to the
