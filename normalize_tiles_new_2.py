@@ -47,10 +47,14 @@ BLACK_ARTIFACT_ENABLED = True   # Set to False to disable artifact filtering
 
 # Configuration: RBC (red blood cell) detection and removal
 # Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
+# Focuses on dark RBCs (overlapping/bad angle) that might be mistaken for nuclei.
 # Based on rbc_regular_features.json: RBC R_G_ratio 1.69-3.21, Regular 1.17-2.02 (no overlap).
-R_G_RATIO_THRESHOLD = 2.0       # Main factor: R/G ratio above this = RBC candidate
-R_B_RATIO_THRESHOLD = 1.45      # Subsidiary: R/B ratio above this supports RBC (default 1.45)
-R_DOMINANCE_THRESHOLD = 0.45    # Subsidiary: R/(R+G+B) above this supports RBC (default 0.45)
+# Loosened thresholds to reduce false positives (normal tissue removal).
+R_G_RATIO_THRESHOLD = 2.2       # Main factor: R/G ratio above this = RBC candidate (raised from 2.0 for fewer false positives)
+R_B_RATIO_THRESHOLD = 1.50      # Subsidiary: R/B ratio above this supports RBC (raised from 1.45)
+R_DOMINANCE_THRESHOLD = 0.48    # Subsidiary: R/(R+G+B) above this supports RBC (raised from 0.45)
+RBC_DARK_THRESHOLD = 100        # Only remove RBCs darker than this (grayscale 0-255). Targets dark RBCs that might be mistaken for nuclei.
+RBC_CHROMA_SAFEGUARD = 55.0     # Chroma safeguard: if chroma > this AND R/G ratio < 2.4, exclude (likely purple nucleus, not RBC)
 RBC_ENABLED = True              # Set to False to disable RBC filtering
 
 # Image extensions to consider
@@ -189,20 +193,28 @@ def remove_black_artifacts(
 
 def detect_rbc_mask(
     img: np.ndarray,
-    r_g_ratio_threshold: float = 2.0,
-    r_b_ratio_threshold: float = 1.45,
-    r_dominance_threshold: float = 0.45,
+    r_g_ratio_threshold: float = 2.2,
+    r_b_ratio_threshold: float = 1.50,
+    r_dominance_threshold: float = 0.48,
+    dark_threshold: int | None = 100,
+    chroma_safeguard: float = 55.0,
 ) -> np.ndarray:
     """
     Detect red blood cells (RBCs) to exclude from normalization.
+    Focuses on dark RBCs (overlapping/bad angle) that might be mistaken for nuclei.
     
     Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
+    Filters by darkness to target only problematic dark RBCs.
+    Includes chroma safeguard to avoid removing purple nuclei (high chroma but lower R/G ratio).
+    
     Based on rbc_regular_features.json analysis: RBCs have higher R/G, R/B, and R dominance.
     
     :param img: RGB uint8 image (H, W, 3).
-    :param r_g_ratio_threshold: Main factor: R/G ratio above this = RBC candidate (default 2.0).
-    :param r_b_ratio_threshold: Subsidiary: R/B ratio above this supports RBC (default 1.45).
-    :param r_dominance_threshold: Subsidiary: R/(R+G+B) above this supports RBC (default 0.45).
+    :param r_g_ratio_threshold: Main factor: R/G ratio above this = RBC candidate (default 2.2, loosened).
+    :param r_b_ratio_threshold: Subsidiary: R/B ratio above this supports RBC (default 1.50, loosened).
+    :param r_dominance_threshold: Subsidiary: R/(R+G+B) above this supports RBC (default 0.48, loosened).
+    :param dark_threshold: Grayscale threshold (0-255). Only remove RBCs darker than this (default 100).
+    :param chroma_safeguard: Chroma threshold. If chroma > this AND R/G < 2.4, exclude (likely purple nucleus).
     :return: Boolean mask where True indicates RBC pixels to exclude.
     """
     if img.ndim != 3 or img.shape[2] != 3:
@@ -226,6 +238,31 @@ def detect_rbc_mask(
     # Combine: main factor AND (at least one subsidiary factor)
     rbc_subsidiary = (r_b_ratio > r_b_ratio_threshold) | (r_dominance > r_dominance_threshold)
     rbc_mask = rbc_main & rbc_subsidiary
+    
+    # Darkness filter: only remove dark RBCs (overlapping/bad angle that might be mistaken for nuclei)
+    if dark_threshold is not None:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        dark_mask = gray < dark_threshold
+        rbc_mask = rbc_mask & dark_mask
+    
+    # Chroma safeguard: avoid removing purple nuclei
+    # Purple nuclei have high chroma but lower R/G ratio. If chroma is very high but R/G is borderline,
+    # it's likely a purple nucleus, not a red RBC.
+    if chroma_safeguard is not None and np.any(rbc_mask):
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        a = lab[:, :, 1].astype(np.float64) - 128.0
+        b = lab[:, :, 2].astype(np.float64) - 128.0
+        chroma = np.sqrt(a * a + b * b)
+        
+        # Exclude pixels with very high chroma AND moderate R/G ratio (likely purple nucleus)
+        # RBCs have high chroma (~53) but also very high R/G (>2.2). Purple nuclei have high chroma but R/G < 2.0 typically.
+        # Safeguard: if chroma > threshold AND R/G < 2.4, exclude from removal
+        high_chroma = chroma > chroma_safeguard
+        moderate_r_g = r_g_ratio < 2.4  # Borderline R/G ratio
+        purple_nucleus_likely = high_chroma & moderate_r_g
+        
+        # Remove purple nucleus candidates from RBC mask
+        rbc_mask = rbc_mask & ~purple_nucleus_likely
     
     return rbc_mask
 
@@ -366,6 +403,19 @@ def parse_args():
         help=f"RBC filter subsidiary: R/(R+G+B) above this supports RBC (default: {R_DOMINANCE_THRESHOLD}).",
     )
     parser.add_argument(
+        "--rbc-dark-threshold",
+        type=int,
+        default=RBC_DARK_THRESHOLD,
+        metavar="N",
+        help=f"RBC filter: only remove RBCs darker than this (grayscale 0-255, default: {RBC_DARK_THRESHOLD}). Use 0 to disable darkness filter.",
+    )
+    parser.add_argument(
+        "--rbc-chroma-safeguard",
+        type=float,
+        default=RBC_CHROMA_SAFEGUARD,
+        help=f"RBC filter chroma safeguard: if chroma > this AND R/G < 2.4, exclude (likely purple nucleus, default: {RBC_CHROMA_SAFEGUARD}). Use 0 to disable.",
+    )
+    parser.add_argument(
         "--disable-rbc-filter",
         action="store_true",
         help="Disable RBC filtering (RBCs will be normalized normally).",
@@ -439,8 +489,10 @@ def main():
         print("Black artifact filter: disabled")
     
     if not args.disable_rbc_filter:
+        dark_str = f", dark<{args.rbc_dark_threshold}" if args.rbc_dark_threshold and args.rbc_dark_threshold > 0 else ""
+        chroma_str = f", chroma_safe>{args.rbc_chroma_safeguard}" if args.rbc_chroma_safeguard and args.rbc_chroma_safeguard > 0 else ""
         print(
-            f"RBC filter: enabled (R/G>{args.r_g_ratio_threshold}, R/B>{args.r_b_ratio_threshold} OR R_dom>{args.r_dominance_threshold})"
+            f"RBC filter: enabled (R/G>{args.r_g_ratio_threshold}, R/B>{args.r_b_ratio_threshold} OR R_dom>{args.r_dominance_threshold}{dark_str}{chroma_str})"
         )
     else:
         print("RBC filter: disabled")
@@ -479,13 +531,19 @@ def main():
                 print(f"    Removed {n_artifacts} black artifact pixels")
         
         # Detect and remove RBCs (red blood cells) before normalization.
+        # Focuses on dark RBCs (overlapping/bad angle) that might be mistaken for nuclei.
         # Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
+        # Includes chroma safeguard to avoid removing purple nuclei.
         if not args.disable_rbc_filter:
+            dark_thresh = args.rbc_dark_threshold if args.rbc_dark_threshold and args.rbc_dark_threshold > 0 else None
+            chroma_safe = args.rbc_chroma_safeguard if args.rbc_chroma_safeguard and args.rbc_chroma_safeguard > 0 else None
             rbc_mask = detect_rbc_mask(
                 tile_rgb,
                 r_g_ratio_threshold=args.r_g_ratio_threshold,
                 r_b_ratio_threshold=args.r_b_ratio_threshold,
                 r_dominance_threshold=args.r_dominance_threshold,
+                dark_threshold=dark_thresh,
+                chroma_safeguard=chroma_safe,
             )
             if np.any(rbc_mask):
                 n_rbcs = np.sum(rbc_mask)
