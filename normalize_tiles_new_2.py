@@ -51,11 +51,14 @@ BLACK_ARTIFACT_ENABLED = True    # Set to False to disable artifact filtering
 # Configuration: RBC (red blood cell) detection and removal
 # Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
 # Focuses on dark RBCs (overlapping/bad angle) that might be mistaken for nuclei.
-# Based on rbc_regular_features.json: RBC R_G_ratio 1.69-3.21, Regular 1.17-2.02 (no overlap).
-# Loosened thresholds to reduce false positives (normal tissue removal).
-R_G_RATIO_THRESHOLD = 2.2       # Main factor: R/G ratio above this = RBC candidate (raised from 2.0 for fewer false positives)
-R_B_RATIO_THRESHOLD = 1.50      # Subsidiary: R/B ratio above this supports RBC (raised from 1.45)
-R_DOMINANCE_THRESHOLD = 0.48    # Subsidiary: R/(R+G+B) above this supports RBC (raised from 0.45)
+# Based on updated rbc_regular_features.json:
+#   - RBC R_G_ratio 1st–99th: ~1.69–3.21, Regular: ~1.17–2.02 (gap above ~2.0)
+#   - RBC R_B_ratio 1st–99th: ~1.11–2.68, Regular: ~0.88–1.43
+#   - RBC R_dominance 1st–99th: ~0.41–0.58, Regular: ~0.35–0.44
+# Defaults are tightened slightly to reduce false positives on non-RBC tissue and nuclei.
+R_G_RATIO_THRESHOLD = 2.3       # Main factor: R/G ratio above this = RBC candidate (tightened from 2.2)
+R_B_RATIO_THRESHOLD = 1.60      # Subsidiary: R/B ratio above this supports RBC (tightened from 1.50)
+R_DOMINANCE_THRESHOLD = 0.50    # Subsidiary: R/(R+G+B) above this supports RBC (tightened from 0.48)
 RBC_DARK_THRESHOLD = 100        # Only remove RBCs darker than this (grayscale 0-255). Targets dark RBCs that might be mistaken for nuclei.
 RBC_CHROMA_SAFEGUARD = 55.0     # Chroma safeguard: if chroma > this AND R/G ratio < 2.4, exclude (likely purple nucleus, not RBC)
 RBC_ENABLED = True              # Set to False to disable RBC filtering
@@ -207,9 +210,9 @@ def remove_black_artifacts(
 
 def detect_rbc_mask(
     img: np.ndarray,
-    r_g_ratio_threshold: float = 2.2,
-    r_b_ratio_threshold: float = 1.50,
-    r_dominance_threshold: float = 0.48,
+    r_g_ratio_threshold: float = 2.3,
+    r_b_ratio_threshold: float = 1.60,
+    r_dominance_threshold: float = 0.50,
     dark_threshold: int | None = 100,
     chroma_safeguard: float = 55.0,
 ) -> np.ndarray:
@@ -219,7 +222,7 @@ def detect_rbc_mask(
     
     Uses R_G_ratio as main factor, R_B_ratio and R_dominance as subsidiary factors.
     Filters by darkness to target only problematic dark RBCs.
-    Includes chroma safeguard to avoid removing purple nuclei (high chroma but lower R/G ratio).
+    Includes chroma and color-space safeguards to avoid removing purple nuclei.
     
     Based on rbc_regular_features.json analysis: RBCs have higher R/G, R/B, and R dominance.
     
@@ -258,26 +261,38 @@ def detect_rbc_mask(
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         dark_mask = gray < dark_threshold
         rbc_mask = rbc_mask & dark_mask
-    
-    # Chroma safeguard: avoid removing purple nuclei
-    # Purple nuclei have high chroma but lower R/G ratio. If chroma is very high but R/G is borderline,
-    # it's likely a purple nucleus, not a red RBC.
-    if chroma_safeguard is not None and np.any(rbc_mask):
+
+    if np.any(rbc_mask):
+        # Strong "purple nucleus" safeguard using LAB and HSV.
+        # Nuclei (from blob_nuclei_features.json) are dark purple:
+        #   - LAB b strongly negative (blue-ish), roughly <= -10
+        #   - HSV H around 140–150 (purple band)
+        #   - chroma in ~25–50
+        # RBCs are more pink/red and typically have b >= 0 and H closer to 170.
         lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
-        a = lab[:, :, 1].astype(np.float64) - 128.0
-        b = lab[:, :, 2].astype(np.float64) - 128.0
-        chroma = np.sqrt(a * a + b * b)
-        
-        # Exclude pixels with very high chroma AND moderate R/G ratio (likely purple nucleus)
-        # RBCs have high chroma (~53) but also very high R/G (>2.2). Purple nuclei have high chroma but R/G < 2.0 typically.
-        # Safeguard: if chroma > threshold AND R/G < 2.4, exclude from removal
-        high_chroma = chroma > chroma_safeguard
-        moderate_r_g = r_g_ratio < 2.4  # Borderline R/G ratio
-        purple_nucleus_likely = high_chroma & moderate_r_g
-        
-        # Remove purple nucleus candidates from RBC mask
-        rbc_mask = rbc_mask & ~purple_nucleus_likely
-    
+        a_lab = lab[:, :, 1].astype(np.float64) - 128.0
+        b_lab = lab[:, :, 2].astype(np.float64) - 128.0
+        chroma = np.sqrt(a_lab * a_lab + b_lab * b_lab)
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        H = hsv[:, :, 0].astype(np.float64)
+
+        blue_b = b_lab < -10.0
+        purple_hue = (H >= 130.0) & (H <= 160.0)
+        nucleus_chroma = chroma > 24.0  # nuclei chroma 1st percentile ~24.7
+        purple_nucleus = blue_b & purple_hue & nucleus_chroma
+
+        # Never treat strong purple-nucleus-colored pixels as RBCs, even if RGB ratios suggest RBC.
+        rbc_mask = rbc_mask & ~purple_nucleus
+
+        # Additional chroma safeguard: avoid removing any remaining high-chroma, borderline-R/G pixels.
+        if chroma_safeguard is not None:
+            # Exclude pixels with very high chroma AND only moderate R/G ratio (likely nuclei or other tissue)
+            high_chroma = chroma > chroma_safeguard
+            moderate_r_g = r_g_ratio < 2.4  # Borderline R/G ratio
+            likely_nucleus = high_chroma & moderate_r_g
+            rbc_mask = rbc_mask & ~likely_nucleus
+
     return rbc_mask
 
 
