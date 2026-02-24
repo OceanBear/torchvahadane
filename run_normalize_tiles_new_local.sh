@@ -17,4 +17,5 @@ python normalize_tiles_new_2.py \
   --input "$INPUT_DIR" \
   --output "$OUTPUT_DIR" \
   --rbc-dark-threshold 100 \
-  --rbc-chroma-safeguard 55
+  --rbc-chroma-safeguard 55 \
+  --disable-rbc-filter

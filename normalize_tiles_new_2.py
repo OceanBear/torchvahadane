@@ -118,10 +118,10 @@ def tissue_only_brightness_standardize(
 
 def detect_black_artifact_mask(
     img: np.ndarray,
-    grayscale_threshold: int = 35,
-    chroma_threshold: float = 20.0,
-    v_threshold: float = 0.20,
-    rgb_std_threshold: float = 12.0,
+    grayscale_threshold: int = 32,
+    chroma_threshold: float = 12.0,
+    v_threshold: float = 0.16,
+    rgb_std_threshold: float = 7.0,
     max_area: int | None = None,
 ) -> np.ndarray:
     """
