@@ -4,6 +4,9 @@ Stain-normalize H&E tiles using a reference image.
 Follows the NucSegAI stain_norm_new pattern:
   - Tissue-only brightness standardization (scale only tissue pixels; blank regions unchanged).
   - Vahadane normalization on standardized reference and tiles.
+  - Optional black-artifact handling (same detection as normalize_tiles_new_2): artifact
+    pixels are excluded from the 99th-percentile concentration scaling (maxC) and copied
+    from the original RGB in the saved image (not replaced with white).
 
 Reference: ref_image/
 Raw tiles: /mnt/d/Downloads/Programs/original_tiles (WSL path for D:\Downloads\Programs\original_tiles)
@@ -36,6 +39,15 @@ WSI_FEATURES_DIR = SCRIPT_DIR / "wsi_features"
 
 # Configuration: tissue brightness uses LAB L (same as stain_extractor_cpu/gpu)
 LUMINANCE_PERCENTILE = 95.0  # Percentile for tissue LAB L (90.0, 95.0, 99.0). Lower = more aggressive.
+
+# Black artifact detection (same logic as normalize_tiles_new_2.py).
+# Detected pixels are excluded from Vahadane maxC scaling and left unchanged in the output.
+GRAYSCALE_DARK_THRESHOLD = 35
+CHROMA_ARTIFACT_THRESHOLD = 20
+V_ARTIFACT_THRESHOLD = 0.20
+RGB_STD_ARTIFACT_THRESHOLD = 12.0
+BLACK_ARTIFACT_MAX_AREA = None
+BLACK_ARTIFACT_ENABLED = True
 
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
@@ -88,6 +100,64 @@ def tissue_only_brightness_standardize(
     out[tissue_mask] *= scale
     out = np.clip(out, 0.0, 1.0)
     return (out * 255.0).astype(img.dtype)
+
+
+def detect_black_artifact_mask(
+    img: np.ndarray,
+    grayscale_threshold: int = 35,
+    chroma_threshold: float = 20.0,
+    v_threshold: float = 0.20,
+    rgb_std_threshold: float = 12.0,
+    max_area: int | None = None,
+) -> np.ndarray:
+    """
+    Two-stage dark artifact mask (carbon, pollution, etc.), matching normalize_tiles_new_2.
+
+    Stage 1: grayscale < threshold (dark pixels only).
+    Stage 2: among those, require low LAB chroma AND low HSV V AND low per-pixel RGB std.
+
+    Returns a boolean mask (H, W) where True = artifact (exclude from maxC; preserve in output).
+    """
+    if img.ndim != 3 or img.shape[2] != 3:
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    dark_mask = gray < grayscale_threshold
+    if not np.any(dark_mask):
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+    a = lab[:, :, 1].astype(np.float64) - 128.0
+    b = lab[:, :, 2].astype(np.float64) - 128.0
+    chroma = np.sqrt(a * a + b * b)
+    chroma_low = chroma < chroma_threshold
+
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    v = hsv[:, :, 2].astype(np.float64) / 255.0
+    v_low = v < v_threshold
+
+    r = img[:, :, 0].astype(np.float64)
+    g = img[:, :, 1].astype(np.float64)
+    b_ch = img[:, :, 2].astype(np.float64)
+    rgb_std = np.std(np.stack([r, g, b_ch], axis=2), axis=2)
+    rgb_std_low = rgb_std < rgb_std_threshold
+
+    artifact_candidate = dark_mask & chroma_low & v_low & rgb_std_low
+    if not np.any(artifact_candidate):
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    if max_area is None or max_area <= 0:
+        return artifact_candidate
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        artifact_candidate.astype(np.uint8), connectivity=8
+    )
+    artifact_mask = np.zeros(img.shape[:2], dtype=bool)
+    for label_id in range(1, num_labels):
+        area = stats[label_id, cv2.CC_STAT_AREA]
+        if area <= max_area:
+            artifact_mask[labels == label_id] = True
+    return artifact_mask
 
 
 def get_known_wsi_ids(wsi_features_dir: Path) -> set[str]:
@@ -162,6 +232,42 @@ def parse_args():
         default=WSI_FEATURES_DIR,
         help="Directory with per-WSI stain matrices from extract_wsi_features.py (default: script dir / wsi_features)",
     )
+    parser.add_argument(
+        "--grayscale-dark-threshold",
+        type=int,
+        default=GRAYSCALE_DARK_THRESHOLD,
+        help=f"Black artifact stage 1: grayscale (0-255), darker = candidate (default: {GRAYSCALE_DARK_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--chroma-artifact-threshold",
+        type=float,
+        default=CHROMA_ARTIFACT_THRESHOLD,
+        help=f"Black artifact stage 2: LAB chroma below this = artifact (default: {CHROMA_ARTIFACT_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--v-artifact-threshold",
+        type=float,
+        default=V_ARTIFACT_THRESHOLD,
+        help=f"Black artifact stage 2: HSV V (0-1) below this = artifact (default: {V_ARTIFACT_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--rgb-std-artifact-threshold",
+        type=float,
+        default=RGB_STD_ARTIFACT_THRESHOLD,
+        help=f"Black artifact stage 2: per-pixel RGB std below this = artifact (default: {RGB_STD_ARTIFACT_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--black-artifact-max-area",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Optional max connected-component area (pixels) for black artifacts; 0 = no limit (default: 0).",
+    )
+    parser.add_argument(
+        "--disable-black-artifact-filter",
+        action="store_true",
+        help="Disable black artifact handling (same behavior as before: all pixels affect maxC).",
+    )
     return parser.parse_args()
 
 
@@ -221,6 +327,20 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
 
+    use_black_artifact = BLACK_ARTIFACT_ENABLED and not args.disable_black_artifact_filter
+    if use_black_artifact:
+        max_area = args.black_artifact_max_area if args.black_artifact_max_area > 0 else None
+        area_str = str(max_area) if max_area else "no limit"
+        print(
+            "Black artifact handling: enabled "
+            f"(exclude from maxC, preserve original RGB; "
+            f"gray<{args.grayscale_dark_threshold}, chroma<{args.chroma_artifact_threshold}, "
+            f"V<{args.v_artifact_threshold}, rgb_std<{args.rgb_std_artifact_threshold}, "
+            f"max_area={area_str})"
+        )
+    else:
+        print("Black artifact handling: disabled")
+
     # Known WSI IDs from wsi_features (prefix match for tile names).
     known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
     if known_wsi_ids:
@@ -271,11 +391,32 @@ def main():
             # a different slide's matrix.
             normalizer.stain_m_fixed = None
 
+        artifact_mask = None
+        if use_black_artifact:
+            max_area = args.black_artifact_max_area if args.black_artifact_max_area > 0 else None
+            artifact_mask = detect_black_artifact_mask(
+                tile_rgb,
+                grayscale_threshold=args.grayscale_dark_threshold,
+                chroma_threshold=args.chroma_artifact_threshold,
+                v_threshold=args.v_artifact_threshold,
+                rgb_std_threshold=args.rgb_std_artifact_threshold,
+                max_area=max_area,
+            )
+            if np.any(artifact_mask):
+                print(f"    Black artifact pixels (excluded from maxC, preserved in output): {np.sum(artifact_mask)}")
+
         tile_std = tissue_only_brightness_standardize(
             tile_rgb,
             luminance_percentile=LUMINANCE_PERCENTILE,
         )
-        normed = normalizer.transform(tile_std)
+        if artifact_mask is not None and np.any(artifact_mask):
+            normed = normalizer.transform(
+                tile_std,
+                artifact_mask=artifact_mask,
+                artifact_preserve_rgb=tile_rgb,
+            )
+        else:
+            normed = normalizer.transform(tile_std)
         out_arr = normed.cpu().numpy() if hasattr(normed, "cpu") else normed
         out_arr = out_arr.astype(np.uint8)
         cv2.imwrite(str(out_path), cv2.cvtColor(out_arr, cv2.COLOR_RGB2BGR))

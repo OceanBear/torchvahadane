@@ -1,3 +1,5 @@
+from typing import Optional
+
 from torchvahadane.optimizers import ista, coord_descent
 import torch
 import numpy as np
@@ -95,7 +97,15 @@ class TorchVahadaneNormalizer():
         # print(self.stain_m_fixed, 'set as transform matrix')
 
 
-    def transform(self, I, method='ista', r=0.01, return_mask=False):
+    def transform(
+        self,
+        I,
+        method='ista',
+        r=0.01,
+        return_mask=False,
+        artifact_mask: Optional[np.ndarray] = None,
+        artifact_preserve_rgb: Optional[np.ndarray] = None,
+    ):
         """Transform input image to reference image pased in fit using vahadane normalization.
 
         Parameters
@@ -107,6 +117,13 @@ class TorchVahadaneNormalizer():
             l1-regularizer
         return_mask : bool
             additionally return the estimated tile tissue mask.
+        artifact_mask : numpy.ndarray, optional
+            Boolean (H, W). True marks dark-artifact pixels: they are excluded from the
+            99th-percentile concentration scaling (maxC) so they do not skew normalization
+            of tissue, and are replaced from ``artifact_preserve_rgb`` in the output.
+        artifact_preserve_rgb : numpy.ndarray, optional
+            uint8 RGB (H, W, 3). Required for pixels where ``artifact_mask`` is True:
+            those locations are copied into the output unchanged (e.g. raw tile RGB).
         Returns
         -------
         torch.Tensor
@@ -125,10 +142,41 @@ class TorchVahadaneNormalizer():
 
         I = _to_tensor(I, self.device)
         concentrations = get_concentrations(I, stain_matrix, regularizer=r, method=method)
-        maxC = percentile(concentrations.T, 99, dim=0)
-        concentrations *= (self.maxC_target / maxC)[:,None]
+
+        artifact_mask_np = None
+        if artifact_mask is not None:
+            artifact_mask_np = np.asarray(artifact_mask, dtype=bool)
+            if artifact_mask_np.ndim != 2:
+                raise ValueError("artifact_mask must be 2D (H, W)")
+            if artifact_mask_np.shape[0] != I.shape[0] or artifact_mask_np.shape[1] != I.shape[1]:
+                raise ValueError("artifact_mask shape must match image height and width")
+
+        if artifact_mask_np is not None and np.any(artifact_mask_np):
+            if artifact_preserve_rgb is None:
+                raise ValueError(
+                    "artifact_preserve_rgb is required when artifact_mask marks any pixels"
+                )
+            pres = np.asarray(artifact_preserve_rgb)
+            if pres.shape != (I.shape[0], I.shape[1], 3):
+                raise ValueError("artifact_preserve_rgb must be (H, W, 3) uint8 RGB matching I")
+            art_flat = torch.from_numpy(artifact_mask_np.reshape(-1)).to(self.device)
+            valid_flat = ~art_flat
+            conc_T = concentrations.T
+            if valid_flat.any():
+                maxC = percentile(conc_T[valid_flat], 99, dim=0)
+            else:
+                maxC = percentile(conc_T, 99, dim=0)
+        else:
+            maxC = percentile(concentrations.T, 99, dim=0)
+
+        concentrations *= (self.maxC_target / maxC)[:, None]
         out = 255 * torch.exp(-1 * torch.matmul(concentrations.T, self.stain_matrix_target))
         out = out.reshape(I.shape).type(torch.uint8)
+
+        if artifact_mask_np is not None and np.any(artifact_mask_np):
+            out_np = out.detach().cpu().numpy().copy()
+            out_np[artifact_mask_np] = pres[artifact_mask_np]
+            out = torch.from_numpy(out_np).to(self.device)
 
         if self.correct_exposure:
             out = _match_histograms_torch(out, self.template_hist_fit, channel_axis=2, mask=_to_tensor(mask, self.device))

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Run stain normalization (normalize_tiles.py).
-# Uses WSI feature stain normalization pipeline; no RBC or black-artifact filters.
+# WSI stain matrices + tissue-only brightness + Vahadane.
+# Black-artifact handling is ON by default (exclude from maxC, preserve original RGB).
+# Add --disable-black-artifact-filter to the python line for legacy all-pixels maxC.
+# RBC removal is only in normalize_tiles_new_2.py.
 #
 # Input:  /scratch/st-kenfield-1/repos/NucSegAI/sample_images2
 # Output: /scratch/st-kenfield-1/repos/NucSegAI/std_output4
