@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Run stain normalization (normalize_tiles.py).
 # WSI stain matrices + tissue-only brightness + Vahadane.
-# Black-artifact handling is ON by default (exclude from maxC, preserve original RGB).
-# Add --disable-black-artifact-filter to the python line for legacy all-pixels maxC.
-# RBC removal is only in normalize_tiles_new_2.py.
+#
+# Filters (both ON by default in normalize_tiles.py): pixels matching the mask are
+# excluded from Vahadane maxC scaling and keep original RGB in the output.
+#   --disable-black-artifact-filter   turn off dark achromatic artifact handling
+#   --disable-rbc-filter              turn off RBC handling
+#
+# Example RBC tuning (same knobs as normalize_tiles_new_2.py):
+#   --rbc-dark-threshold 100 --rbc-chroma-safeguard 55
 #
 # Input:  /scratch/st-kenfield-1/repos/NucSegAI/sample_images2
 # Output: /scratch/st-kenfield-1/repos/NucSegAI/std_output4
@@ -17,4 +22,6 @@ OUTPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/std_output4"
 cd "$SCRIPT_DIR"
 python normalize_tiles.py \
   --input "$INPUT_DIR" \
-  --output "$OUTPUT_DIR"
+  --output "$OUTPUT_DIR" \
+  --rbc-dark-threshold 100 \
+  --rbc-chroma-safeguard 55

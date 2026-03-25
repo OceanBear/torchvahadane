@@ -4,9 +4,11 @@ Stain-normalize H&E tiles using a reference image.
 Follows the NucSegAI stain_norm_new pattern:
   - Tissue-only brightness standardization (scale only tissue pixels; blank regions unchanged).
   - Vahadane normalization on standardized reference and tiles.
-  - Optional black-artifact handling (same detection as normalize_tiles_new_2): artifact
-    pixels are excluded from the 99th-percentile concentration scaling (maxC) and copied
-    from the original RGB in the saved image (not replaced with white).
+  - Optional black-artifact handling (same detection as normalize_tiles_new_2): those
+    pixels are excluded from maxC and copied from the original RGB in the output.
+  - Optional RBC handling (same detection as normalize_tiles_new_2): RBC pixels are
+    excluded from maxC and copied from the original RGB (ignored for stain norm, not
+    painted white).
 
 Reference: ref_image/
 Raw tiles: /mnt/d/Downloads/Programs/original_tiles (WSL path for D:\Downloads\Programs\original_tiles)
@@ -48,6 +50,14 @@ V_ARTIFACT_THRESHOLD = 0.20
 RGB_STD_ARTIFACT_THRESHOLD = 12.0
 BLACK_ARTIFACT_MAX_AREA = None
 BLACK_ARTIFACT_ENABLED = True
+
+# RBC detection (same logic as normalize_tiles_new_2.py); excluded from maxC, original RGB kept.
+R_G_RATIO_THRESHOLD = 2.3
+R_B_RATIO_THRESHOLD = 1.60
+R_DOMINANCE_THRESHOLD = 0.50
+RBC_DARK_THRESHOLD = 100
+RBC_CHROMA_SAFEGUARD = 55.0
+RBC_ENABLED = True
 
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
@@ -160,6 +170,68 @@ def detect_black_artifact_mask(
     return artifact_mask
 
 
+def detect_rbc_mask(
+    img: np.ndarray,
+    r_g_ratio_threshold: float = 2.3,
+    r_b_ratio_threshold: float = 1.60,
+    r_dominance_threshold: float = 0.50,
+    dark_threshold: int | None = 100,
+    chroma_safeguard: float = 55.0,
+) -> np.ndarray:
+    """
+    RBC mask matching normalize_tiles_new_2 (RGB ratios + darkness + nucleus safeguards).
+
+    Returns boolean (H, W) where True = RBC pixel (exclude from maxC; preserve in output).
+    """
+    if img.ndim != 3 or img.shape[2] != 3:
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    R = img[:, :, 0].astype(np.float64)
+    G = img[:, :, 1].astype(np.float64)
+    B = img[:, :, 2].astype(np.float64)
+
+    r_g_ratio = np.where(G > 0, R / G, np.inf)
+    rbc_main = r_g_ratio > r_g_ratio_threshold
+
+    if not np.any(rbc_main):
+        return np.zeros(img.shape[:2], dtype=bool)
+
+    r_b_ratio = np.where(B > 0, R / B, np.inf)
+    r_dominance = R / (R + G + B + 1e-10)
+
+    rbc_subsidiary = (r_b_ratio > r_b_ratio_threshold) | (r_dominance > r_dominance_threshold)
+    rbc_mask = rbc_main & rbc_subsidiary
+
+    if dark_threshold is not None:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        dark_mask = gray < dark_threshold
+        rbc_mask = rbc_mask & dark_mask
+
+    if np.any(rbc_mask):
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        a_lab = lab[:, :, 1].astype(np.float64) - 128.0
+        b_lab = lab[:, :, 2].astype(np.float64) - 128.0
+        chroma = np.sqrt(a_lab * a_lab + b_lab * b_lab)
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        H = hsv[:, :, 0].astype(np.float64)
+
+        blue_b = b_lab < -10.0
+        purple_hue = (H >= 130.0) & (H <= 160.0)
+        nucleus_chroma = chroma > 24.0
+        purple_nucleus = blue_b & purple_hue & nucleus_chroma
+
+        rbc_mask = rbc_mask & ~purple_nucleus
+
+        if chroma_safeguard is not None and chroma_safeguard > 0:
+            high_chroma = chroma > chroma_safeguard
+            moderate_r_g = r_g_ratio < 2.4
+            likely_nucleus = high_chroma & moderate_r_g
+            rbc_mask = rbc_mask & ~likely_nucleus
+
+    return rbc_mask
+
+
 def get_known_wsi_ids(wsi_features_dir: Path) -> set[str]:
     """
     Collect WSI IDs from wsi_features by listing *_stain_matrix.npy files.
@@ -266,7 +338,49 @@ def parse_args():
     parser.add_argument(
         "--disable-black-artifact-filter",
         action="store_true",
-        help="Disable black artifact handling (same behavior as before: all pixels affect maxC).",
+        help="Disable black artifact handling (all pixels affect maxC for that step).",
+    )
+    parser.add_argument(
+        "--r-g-ratio-threshold",
+        type=float,
+        default=R_G_RATIO_THRESHOLD,
+        help=f"RBC: R/G above this starts candidate (default: {R_G_RATIO_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--r-b-ratio-threshold",
+        type=float,
+        default=R_B_RATIO_THRESHOLD,
+        help=f"RBC: subsidiary R/B above this supports RBC (default: {R_B_RATIO_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--r-dominance-threshold",
+        type=float,
+        default=R_DOMINANCE_THRESHOLD,
+        help=f"RBC: subsidiary R/(R+G+B) above this supports RBC (default: {R_DOMINANCE_THRESHOLD}).",
+    )
+    parser.add_argument(
+        "--rbc-dark-threshold",
+        type=int,
+        default=RBC_DARK_THRESHOLD,
+        metavar="N",
+        help=(
+            f"RBC: only flag pixels darker than this grayscale (0-255); "
+            f"0 = no darkness gate (default: {RBC_DARK_THRESHOLD})."
+        ),
+    )
+    parser.add_argument(
+        "--rbc-chroma-safeguard",
+        type=float,
+        default=RBC_CHROMA_SAFEGUARD,
+        help=(
+            f"RBC: if chroma > this and R/G < 2.4, keep as nucleus (default: {RBC_CHROMA_SAFEGUARD}). "
+            "Use 0 to disable this safeguard."
+        ),
+    )
+    parser.add_argument(
+        "--disable-rbc-filter",
+        action="store_true",
+        help="Disable RBC exclusion from maxC (RBC pixels normalized like other tissue).",
     )
     return parser.parse_args()
 
@@ -341,6 +455,27 @@ def main():
     else:
         print("Black artifact handling: disabled")
 
+    use_rbc = RBC_ENABLED and not args.disable_rbc_filter
+    if use_rbc:
+        dark_note = (
+            f"dark<{args.rbc_dark_threshold}"
+            if args.rbc_dark_threshold and args.rbc_dark_threshold > 0
+            else "no dark gate"
+        )
+        chroma_note = (
+            f", chroma_safe>{args.rbc_chroma_safeguard}"
+            if args.rbc_chroma_safeguard and args.rbc_chroma_safeguard > 0
+            else ", chroma_safe=off"
+        )
+        print(
+            "RBC handling: enabled "
+            f"(exclude from maxC, preserve original RGB; R/G>{args.r_g_ratio_threshold}, "
+            f"R/B>{args.r_b_ratio_threshold} OR R_dom>{args.r_dominance_threshold}; "
+            f"{dark_note}{chroma_note})"
+        )
+    else:
+        print("RBC handling: disabled")
+
     # Known WSI IDs from wsi_features (prefix match for tile names).
     known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
     if known_wsi_ids:
@@ -391,10 +526,10 @@ def main():
             # a different slide's matrix.
             normalizer.stain_m_fixed = None
 
-        artifact_mask = None
+        preserve_mask = np.zeros(tile_rgb.shape[:2], dtype=bool)
         if use_black_artifact:
             max_area = args.black_artifact_max_area if args.black_artifact_max_area > 0 else None
-            artifact_mask = detect_black_artifact_mask(
+            black_mask = detect_black_artifact_mask(
                 tile_rgb,
                 grayscale_threshold=args.grayscale_dark_threshold,
                 chroma_threshold=args.chroma_artifact_threshold,
@@ -402,17 +537,41 @@ def main():
                 rgb_std_threshold=args.rgb_std_artifact_threshold,
                 max_area=max_area,
             )
-            if np.any(artifact_mask):
-                print(f"    Black artifact pixels (excluded from maxC, preserved in output): {np.sum(artifact_mask)}")
+            preserve_mask |= black_mask
+            if np.any(black_mask):
+                print(
+                    f"    Black artifact pixels (excluded from maxC, preserved): {np.sum(black_mask)}"
+                )
+
+        if use_rbc:
+            dark_thresh = (
+                args.rbc_dark_threshold if args.rbc_dark_threshold and args.rbc_dark_threshold > 0 else None
+            )
+            chroma_safe = (
+                args.rbc_chroma_safeguard
+                if args.rbc_chroma_safeguard and args.rbc_chroma_safeguard > 0
+                else None
+            )
+            rbc_mask = detect_rbc_mask(
+                tile_rgb,
+                r_g_ratio_threshold=args.r_g_ratio_threshold,
+                r_b_ratio_threshold=args.r_b_ratio_threshold,
+                r_dominance_threshold=args.r_dominance_threshold,
+                dark_threshold=dark_thresh,
+                chroma_safeguard=chroma_safe,
+            )
+            preserve_mask |= rbc_mask
+            if np.any(rbc_mask):
+                print(f"    RBC pixels (excluded from maxC, preserved): {np.sum(rbc_mask)}")
 
         tile_std = tissue_only_brightness_standardize(
             tile_rgb,
             luminance_percentile=LUMINANCE_PERCENTILE,
         )
-        if artifact_mask is not None and np.any(artifact_mask):
+        if np.any(preserve_mask):
             normed = normalizer.transform(
                 tile_std,
-                artifact_mask=artifact_mask,
+                artifact_mask=preserve_mask,
                 artifact_preserve_rgb=tile_rgb,
             )
         else:
