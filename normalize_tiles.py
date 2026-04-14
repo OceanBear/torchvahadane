@@ -59,6 +59,11 @@ RBC_DARK_THRESHOLD = 100
 RBC_CHROMA_SAFEGUARD = 55.0
 RBC_ENABLED = True
 
+# When estimating stain matrix per-tile (no WSI matrix), also exclude artifact/RBC pixels from fitting.
+# CLI can disable these independently (--disable-stain-est-*-exclusion).
+STAIN_EST_EXCLUDE_ARTIFACT_DEFAULT = True
+STAIN_EST_EXCLUDE_RBC_DEFAULT = True
+
 # Image extensions to consider
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 
@@ -269,6 +274,42 @@ def infer_wsi_id_from_tile_name(tile_path: Path, known_wsi_ids: set[str]) -> str
     return ""
 
 
+def lab_luminosity_tissue_mask(
+    img_rgb: np.ndarray, luminosity_threshold: float = 0.8
+) -> np.ndarray:
+    """
+    Tissue vs blank/black, matching StainExtractorCPU.get_tissue_mask (LAB L).
+    Returns boolean (H, W); True = tissue pixel used for stain estimation.
+    """
+    if img_rgb.ndim != 3 or img_rgb.shape[2] != 3:
+        return np.zeros(img_rgb.shape[:2], dtype=bool)
+    i_lab = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB)
+    l_chan = i_lab[:, :, 0].astype(np.float32) / 255.0
+    return (l_chan < luminosity_threshold) & (l_chan > 0)
+
+
+def set_per_tile_stain_matrix_from_tile(
+    normalizer: TorchVahadaneNormalizer,
+    tile_std: np.ndarray,
+    fit_mask: np.ndarray,
+) -> None:
+    """
+    Run dictionary learning on ``tile_std`` using only pixels where ``fit_mask`` is True,
+    then set ``normalizer.stain_m_fixed`` so ``transform`` does not re-estimate.
+    Mirrors CPU vs GPU branches in ``TorchVahadaneNormalizer.transform``.
+    """
+    se = normalizer.stain_extractor
+    if normalizer.staintools_estimate:
+        sm = se.get_stain_matrix(tile_std, mask=fit_mask)
+    else:
+        from torchvahadane.utils import _to_tensor
+
+        i_t = _to_tensor(tile_std, normalizer.device)
+        m_t = torch.from_numpy(fit_mask.astype(np.uint8)).to(normalizer.device).bool()
+        sm = se.get_stain_matrix(i_t, mask=m_t)
+    normalizer.set_stain_matrix(sm)
+
+
 def find_reference_image(ref_dir: Path) -> Path:
     """Find first reference image in ref_image directory."""
     for ext in IMAGE_EXTENSIONS:
@@ -382,6 +423,22 @@ def parse_args():
         action="store_true",
         help="Disable RBC exclusion from maxC (RBC pixels normalized like other tissue).",
     )
+    parser.add_argument(
+        "--disable-stain-est-artifact-exclusion",
+        action="store_true",
+        help=(
+            "When estimating stain matrix per-tile (no WSI matrix), include black-artifact "
+            "pixels in dictionary learning (default: exclude them; same detector as maxC)."
+        ),
+    )
+    parser.add_argument(
+        "--disable-stain-est-rbc-exclusion",
+        action="store_true",
+        help=(
+            "When estimating stain matrix per-tile (no WSI matrix), include RBC pixels in "
+            "dictionary learning (default: exclude them; same detector as maxC)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -476,6 +533,14 @@ def main():
     else:
         print("RBC handling: disabled")
 
+    use_stain_est_artifact_excl = STAIN_EST_EXCLUDE_ARTIFACT_DEFAULT and not args.disable_stain_est_artifact_exclusion
+    use_stain_est_rbc_excl = STAIN_EST_EXCLUDE_RBC_DEFAULT and not args.disable_stain_est_rbc_exclusion
+    print(
+        "Per-tile stain estimation (no WSI matrix): "
+        f"exclude artifacts from fit={'on' if use_stain_est_artifact_excl else 'off'}, "
+        f"exclude RBC from fit={'on' if use_stain_est_rbc_excl else 'off'}"
+    )
+
     # Known WSI IDs from wsi_features (prefix match for tile names).
     known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
     if known_wsi_ids:
@@ -517,17 +582,14 @@ def main():
                 else:
                     print(f"  Warning: no WSI stain matrix found for slide {wsi_id} at {stain_path}")
 
-        # If we have a per-WSI stain matrix, fix it for this tile; otherwise let
-        # TorchVahadane estimate per-tile stains as usual.
-        if stain_matrix is not None:
-            normalizer.set_stain_matrix(stain_matrix)
-        else:
-            # Clear any previously fixed matrix so we don't accidentally reuse
-            # a different slide's matrix.
-            normalizer.stain_m_fixed = None
+        h, w = tile_rgb.shape[:2]
+        need_black_mask = use_black_artifact or (
+            stain_matrix is None and use_stain_est_artifact_excl
+        )
+        need_rbc_mask = use_rbc or (stain_matrix is None and use_stain_est_rbc_excl)
 
-        preserve_mask = np.zeros(tile_rgb.shape[:2], dtype=bool)
-        if use_black_artifact:
+        black_mask = np.zeros((h, w), dtype=bool)
+        if need_black_mask:
             max_area = args.black_artifact_max_area if args.black_artifact_max_area > 0 else None
             black_mask = detect_black_artifact_mask(
                 tile_rgb,
@@ -537,13 +599,9 @@ def main():
                 rgb_std_threshold=args.rgb_std_artifact_threshold,
                 max_area=max_area,
             )
-            preserve_mask |= black_mask
-            if np.any(black_mask):
-                print(
-                    f"    Black artifact pixels (excluded from maxC, preserved): {np.sum(black_mask)}"
-                )
 
-        if use_rbc:
+        rbc_mask = np.zeros((h, w), dtype=bool)
+        if need_rbc_mask:
             dark_thresh = (
                 args.rbc_dark_threshold if args.rbc_dark_threshold and args.rbc_dark_threshold > 0 else None
             )
@@ -560,14 +618,47 @@ def main():
                 dark_threshold=dark_thresh,
                 chroma_safeguard=chroma_safe,
             )
-            preserve_mask |= rbc_mask
-            if np.any(rbc_mask):
-                print(f"    RBC pixels (excluded from maxC, preserved): {np.sum(rbc_mask)}")
 
         tile_std = tissue_only_brightness_standardize(
             tile_rgb,
             luminance_percentile=LUMINANCE_PERCENTILE,
         )
+
+        # Per-WSI matrix: unchanged. Otherwise estimate stain matrix on this tile using
+        # tissue mask minus artifact/RBC (when enabled via stain-est flags).
+        if stain_matrix is not None:
+            normalizer.set_stain_matrix(stain_matrix)
+        else:
+            tissue_m = lab_luminosity_tissue_mask(tile_std)
+            if not np.any(tissue_m):
+                raise RuntimeError(
+                    f"Empty tissue mask after LAB luminosity filter for stain estimation: {path.name}"
+                )
+            fit_mask = tissue_m.copy()
+            if use_stain_est_artifact_excl:
+                fit_mask &= ~black_mask
+            if use_stain_est_rbc_excl:
+                fit_mask &= ~rbc_mask
+            if not np.any(fit_mask):
+                print(
+                    f"  Warning: no pixels left for stain estimation after tissue/artifact/RBC "
+                    f"filters for {path.name}; using tissue-only mask for dictionary learning."
+                )
+                fit_mask = tissue_m
+            set_per_tile_stain_matrix_from_tile(normalizer, tile_std, fit_mask)
+
+        preserve_mask = np.zeros((h, w), dtype=bool)
+        if use_black_artifact:
+            preserve_mask |= black_mask
+            if np.any(black_mask):
+                print(
+                    f"    Black artifact pixels (excluded from maxC, preserved): {np.sum(black_mask)}"
+                )
+
+        if use_rbc:
+            preserve_mask |= rbc_mask
+            if np.any(rbc_mask):
+                print(f"    RBC pixels (excluded from maxC, preserved): {np.sum(rbc_mask)}")
         if np.any(preserve_mask):
             normed = normalizer.transform(
                 tile_std,

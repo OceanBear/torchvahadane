@@ -4,7 +4,12 @@
 # Output: /mnt/j/HandE/.../SCN_torch_v3
 #
 # RBC filter: removes dark RBCs (dark<100) with chroma safeguard to avoid removing purple nuclei.
-# Use --disable-rbc-filter or --disable-black-artifact-filter to turn filters off.
+# Use --disable-rbc-filter or --disable-black-artifact-filter to turn maxC/output handling off.
+#
+# Per-tile stain estimation (when no WSI stain matrix): normalize_tiles.py can also exclude
+# artifact/RBC pixels from dictionary learning; that is separate from maxC. Pairing:
+#   --disable-rbc-filter  ->  add --disable-stain-est-rbc-exclusion for consistent "RBC off"
+#   --disable-black-artifact-filter  ->  add --disable-stain-est-artifact-exclusion if desired
 
 set -euo pipefail
 
