@@ -10,12 +10,16 @@
 # artifact/RBC pixels from dictionary learning; that is separate from maxC. Pairing:
 #   --disable-rbc-filter  ->  add --disable-stain-est-rbc-exclusion for consistent "RBC off"
 #   --disable-black-artifact-filter  ->  add --disable-stain-est-artifact-exclusion if desired
-
+# default thresholds:
+#  --grayscale-dark-threshold 35
+#  --chroma-artifact-threshold 20
+#  --v-artifact-threshold 0.20
+#  --rgb-std-artifact-threshold 12
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/mnt/d/Downloads/Compressed/compath-master/latticea_test_data/imgs_tiff"
-OUTPUT_DIR="/mnt/d/Downloads/Compressed/compath-master/latticea_test_data/imgs_tiff_scn"
+INPUT_DIR="/mnt/d/BCCRC-work/lattice-a/imgs_tiff/imgs_mpp025_tiff"
+OUTPUT_DIR="/mnt/d/BCCRC-work/lattice-a/imgs_tiff/imgs_mpp025_scn"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles.py \
