@@ -1,0 +1,1 @@
+python convert_images_to_tiff.py --dir "/mnt/d/BCCRC-work/TNBC_NucleiSegmentation/slides"

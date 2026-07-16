@@ -346,11 +346,6 @@ def parse_args():
         help="Directory with per-WSI stain matrices from extract_wsi_features.py (default: script dir / wsi_features)",
     )
     parser.add_argument(
-        "--no-wsi-features",
-        action="store_true",
-        help="Ignore wsi_features; estimate stain matrix per tile only.",
-    )
-    parser.add_argument(
         "--grayscale-dark-threshold",
         type=int,
         default=GRAYSCALE_DARK_THRESHOLD,
@@ -547,13 +542,9 @@ def main():
     )
 
     # Known WSI IDs from wsi_features (prefix match for tile names).
-    if args.no_wsi_features:
-        known_wsi_ids: set[str] = set()
-        print("WSI stain matrices: disabled (per-tile stain estimation only)")
-    else:
-        known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
-        if known_wsi_ids:
-            print(f"Known WSI IDs from {wsi_features_dir}: {sorted(known_wsi_ids)}")
+    known_wsi_ids = get_known_wsi_ids(wsi_features_dir)
+    if known_wsi_ids:
+        print(f"Known WSI IDs from {wsi_features_dir}: {sorted(known_wsi_ids)}")
 
     # Cache of per-WSI stain matrices so we only load each once.
     wsi_stain_cache: Dict[str, np.ndarray] = {}

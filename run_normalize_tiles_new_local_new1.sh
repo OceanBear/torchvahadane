@@ -18,8 +18,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22"
-OUTPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22_scn"
+INPUT_DIR="/mnt/d/BCCRC-work/MoNuSeg/test/tiles"
+OUTPUT_DIR="/mnt/d/BCCRC-work/MoNuSeg/test/tiles_scn"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles.py \

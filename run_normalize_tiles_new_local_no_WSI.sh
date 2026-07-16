@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run stain normalization with NucSegAI sample images (local/WSL paths).
-# Input:  /mnt/j/HandE/.../original_tiles
-# Output: /mnt/j/HandE/.../SCN_torch_v3
+# Run stain normalization with per-tile stain estimation only (no wsi_features).
+# Input:  /mnt/d/BCCRC-work/MoNuSeg-Selected-LUDA/tiff
+# Output: /mnt/d/BCCRC-work/MoNuSeg-Selected-LUDA/tiff_scn
 #
 # RBC filter: removes dark RBCs (dark<100) with chroma safeguard to avoid removing purple nuclei.
 # Use --disable-rbc-filter or --disable-black-artifact-filter to turn maxC/output handling off.
@@ -18,13 +18,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22"
-OUTPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22_scn"
+INPUT_DIR="/mnt/d/BCCRC-work/new_training/JN_TS_batch3"
+OUTPUT_DIR="/mnt/d/BCCRC-work/new_training/scn"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles.py \
   --input "$INPUT_DIR" \
   --output "$OUTPUT_DIR" \
+  --no-wsi-features \
   --rbc-dark-threshold 100 \
   --rbc-chroma-safeguard 55 \
   --disable-rbc-filter
