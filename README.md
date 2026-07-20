@@ -6,15 +6,19 @@ This repository is a fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torc
 
 ## What this fork adds
 
-| Component | Role |
-|-----------|------|
-| `normalize_tiles.py` | Batch-normalize H&E tiles against a reference image |
-| `helper_scripts/extract_wsi_features.py` | Estimate per-slide stain matrices from WSIs(`.svs`) |
-| `helper_scripts/npy_to_json.py` | Convert WSI feature `.npy` files to JSON |
-| `helper_scripts/convert_images_to_tiff.py` | Batch-convert PNG/JPG to TIFF |
-| `helper_scripts/check_luminosity.py` | QC: mean LAB L per TIFF |
-| `helper_scripts/extract_blob_nuclei_features.py` | Calibrate black-artifact thresholds |
-| `helper_scripts/extract_rbc_regular_features.py` | Calibrate RBC thresholds |
+
+| Component                                        | Role                                                |
+| ------------------------------------------------ | --------------------------------------------------- |
+| `normalize_tiles.py`                             | Batch-normalize H&E tiles against a reference image |
+| `helper_scripts/extract_wsi_features.py`         | Estimate per-slide stain matrices from WSIs(`.svs`) |
+| `helper_scripts/npy_to_json.py`                  | Convert WSI feature `.npy` files to JSON            |
+| `helper_scripts/convert_images_to_tiff.py`       | Batch-convert PNG/JPG to TIFF                       |
+| `helper_scripts/check_luminosity.py`             | QC: mean LAB L per TIFF                             |
+| `helper_scripts/extract_blob_nuclei_features.py` | Calibrate black-artifact thresholds                 |
+| `helper_scripts/extract_rbc_regular_features.py` | Calibrate RBC thresholds                            |
+
+
+
 
 ## Pipeline overview
 
@@ -30,16 +34,18 @@ This repository is a fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torc
 
 1. **(Optional)** Estimate a robust stain matrix per slide from the WSI.
 2. Place a **reference** H&E image in `ref_image/` (target stain style). The bundled reference is from [NucSegAI](https://github.com/gevaertlab/NucSegAI/tree/master/ref_image); you can replace it with your own.
-3. Run **`normalize_tiles.py`** on a folder of tiles.
+3. Run `normalize_tiles.py` on a folder of tiles.
 
 For each tile, the normalizer:
 
 1. Applies **tissue-only brightness standardization** (LAB L; blank/black left unchanged).
 2. Fits Vahadane to the reference (`fit`) to get the **target** stain style.
 3. Uses a **source** stain matrix from:
-   - matching `wsi_features/<wsi_id>_stain_matrix.npy` (tile name prefix match), or
-   - **per-tile estimation** if no WSI matrix is available.
+  - matching `wsi_features/<wsi_id>_stain_matrix.npy` (tile name prefix match), or
+  - **per-tile estimation** if no WSI matrix is available.
 4. Optionally treats **black artifacts** and **RBCs** as special: excluded from maxC scaling and copied from the original RGB in the output.
+
+
 
 ## Requirements
 
@@ -49,20 +55,24 @@ For each tile, the normalizer:
 
 Defaults (override with CLI):
 
-| Path | Default |
-|------|---------|
-| Reference image | `ref_image/` |
-| Input tiles | `original_tiles/` |
-| Output | `normalized_tiles/` |
-| WSI stain matrices | `wsi_features/` |
+
+| Path               | Default             |
+| ------------------ | ------------------- |
+| Reference image    | `ref_image/`        |
+| Input tiles        | `original_tiles/`   |
+| Output             | `normalized_tiles/` |
+| WSI stain matrices | `wsi_features/`     |
+
 
 Tile filenames should start with the slide ID when using WSI features (e.g. `JN_TS_013_bg_tile_....tiff` → `JN_TS_013_stain_matrix.npy`).
 
 ---
 
+
+
 ## Installation (conda)
 
-These steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in [`requirements.txt`](requirements.txt)).
+These steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in `[requirements.txt](requirements.txt)`).
 
 ```bash
 # 1. Create and activate the env (same Python as the reference env)
@@ -101,20 +111,28 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 
 ---
 
+
+
 ## Tested hardware
 
-Our development and testing were done on:
+Our development and testing were done a Windows 11 PC with Windows Subsystem for Linux ([WSL](https://learn.microsoft.com/en-us/windows/wsl/install)). 
 
-| Component | Spec |
-|-----------|------|
-| CPU | Intel Core Ultra 9 185H |
-| RAM | 32 GB |
-| GPU | NVIDIA GeForce RTX 4090 Laptop (16 GB VRAM) |
-| NVIDIA driver | 596.08 (`nvidia-smi` 595.66) |
-| CUDA (driver-reported) | 13.2 |
-| PyTorch CUDA build | 12.8 (`torch==2.10.0+cu128`) |
+The spec of this PC are shown below:
+
+
+| Component              | Spec                                        |
+| ---------------------- | ------------------------------------------- |
+| CPU                    | Intel Core Ultra 9 185H                     |
+| RAM                    | 32 GB                                       |
+| GPU                    | NVIDIA GeForce RTX 4090 Laptop (16 GB VRAM) |
+| NVIDIA driver          | 596.08 (`nvidia-smi` 595.66)                |
+| CUDA (driver-reported) | 13.2                                        |
+| PyTorch CUDA build     | 12.8 (`torch==2.10.0+cu128`)                |
+
 
 ---
+
+
 
 ## Use cases
 
@@ -141,6 +159,8 @@ Or edit paths in `run_normalize_tiles.sh` and run:
 bash run_normalize_tiles.sh
 ```
 
+
+
 ### 2. Normalize without WSI features
 
 If `wsi_features/` is missing or a tile has no matching `*_stain_matrix.npy`, the script estimates the stain matrix **from that tile**.
@@ -155,14 +175,18 @@ python normalize_tiles.py \
   --disable-stain-est-rbc-exclusion
 ```
 
+
+
 ### 3. Turn off artifact / RBC handling
 
 Two layers are independent:
 
-| Concern | Flags (both ON by default) |
-|---------|----------------------------|
-| Exclude from maxC + preserve original RGB | `--disable-black-artifact-filter`, `--disable-rbc-filter` |
-| Exclude from per-tile stain-matrix fit | `--disable-stain-est-artifact-exclusion`, `--disable-stain-est-rbc-exclusion` |
+
+| Concern                                   | Flags (both ON by default)                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| Exclude from maxC + preserve original RGB | `--disable-black-artifact-filter`, `--disable-rbc-filter`                     |
+| Exclude from per-tile stain-matrix fit    | `--disable-stain-est-artifact-exclusion`, `--disable-stain-est-rbc-exclusion` |
+
 
 For a consistent “RBC off” / “artifact off”:
 
@@ -185,6 +209,8 @@ python normalize_tiles.py \
   --rbc-dark-threshold 100 \
   --rbc-chroma-safeguard 55
 ```
+
+
 
 ### 4. Extract WSI stain features
 
@@ -209,6 +235,8 @@ python helper_scripts/npy_to_json.py \
   --input_dir wsi_features \
   --output_dir wsi_features_json
 ```
+
+
 
 ### 5. Convert images to TIFF
 
@@ -248,24 +276,30 @@ Prints mean LAB L per TIFF and a folder average.
 
 ---
 
+
+
 ## `normalize_tiles.py` quick reference
 
-| Flag | Default / notes |
-|------|-----------------|
-| `--input` | Input tile directory |
-| `--output` | Output directory |
-| `--ref-dir` | Directory containing the reference image |
-| `--wsi-features` | Directory with `*_stain_matrix.npy` |
-| `--disable-black-artifact-filter` | Off maxC exclusion + RGB preserve for artifacts |
-| `--disable-rbc-filter` | Off maxC exclusion + RGB preserve for RBCs |
-| `--disable-stain-est-artifact-exclusion` | Include artifacts when fitting per-tile stain matrix |
-| `--disable-stain-est-rbc-exclusion` | Include RBCs when fitting per-tile stain matrix |
-| Black-artifact knobs | `--grayscale-dark-threshold`, `--chroma-artifact-threshold`, `--v-artifact-threshold`, `--rgb-std-artifact-threshold`, `--black-artifact-max-area` |
-| RBC knobs | `--r-g-ratio-threshold`, `--r-b-ratio-threshold`, `--r-dominance-threshold`, `--rbc-dark-threshold`, `--rbc-chroma-safeguard` |
+
+| Flag                                     | Default / notes                                                                                                                                    |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--input`                                | Input tile directory                                                                                                                               |
+| `--output`                               | Output directory                                                                                                                                   |
+| `--ref-dir`                              | Directory containing the reference image                                                                                                           |
+| `--wsi-features`                         | Directory with `*_stain_matrix.npy`                                                                                                                |
+| `--disable-black-artifact-filter`        | Off maxC exclusion + RGB preserve for artifacts                                                                                                    |
+| `--disable-rbc-filter`                   | Off maxC exclusion + RGB preserve for RBCs                                                                                                         |
+| `--disable-stain-est-artifact-exclusion` | Include artifacts when fitting per-tile stain matrix                                                                                               |
+| `--disable-stain-est-rbc-exclusion`      | Include RBCs when fitting per-tile stain matrix                                                                                                    |
+| Black-artifact knobs                     | `--grayscale-dark-threshold`, `--chroma-artifact-threshold`, `--v-artifact-threshold`, `--rgb-std-artifact-threshold`, `--black-artifact-max-area` |
+| RBC knobs                                | `--r-g-ratio-threshold`, `--r-b-ratio-threshold`, `--r-dominance-threshold`, `--rbc-dark-threshold`, `--rbc-chroma-safeguard`                      |
+
 
 Run `python normalize_tiles.py -h` for full help.
 
 ---
+
+
 
 ## Library API (upstream)
 
@@ -278,6 +312,8 @@ normalizer = TorchVahadaneNormalizer(device="cuda", staintools_estimate=True)
 normalizer.fit(target)
 img_normed = normalizer.transform(img)
 ```
+
+
 
 ## Acknowledgments
 
