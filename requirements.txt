@@ -1,0 +1,18 @@
+# Pinned to the conda env `torchvahadane` on OceanBear (Python 3.11.3).
+# Install the local package afterward: pip install .
+#
+# Notes:
+# - Install OpenSlide first via conda: conda install -c conda-forge openslide=4.0.0
+#   (openslide-python needs the shared library; on OceanBear openslide-python is also
+#   available from conda-forge as openslide-python=1.4.3).
+# - Prefer the CUDA 12.8 torch wheel (see README) so nvidia-*-cu12 deps match this env.
+# - spams is required for staintools_estimate=True; optional if you only use GPU extraction.
+
+numpy==1.23.5
+opencv-python==4.8.1.78
+scipy==1.11.4
+torch==2.10.0
+tqdm==4.67.3
+Pillow==12.1.0
+openslide-python==1.4.3
+spams==2.6.5.4

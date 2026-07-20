@@ -43,7 +43,7 @@ For each tile, the normalizer:
 
 ## Requirements
 
-- Python environment with this package installed (see [Installation](torchvahadane.md#installation) in the upstream docs).
+- Python environment with this package installed (see below, or [Installation](torchvahadane.md#installation) in the upstream docs).
 - Recommended: CUDA for speed; `spams` for the faster CPU/staintools-style stain matrix path (falls back to GPU extraction if missing).
 - For WSI feature extraction: **OpenSlide**.
 
@@ -57,6 +57,59 @@ Defaults (override with CLI):
 | WSI stain matrices | `wsi_features/` |
 
 Tile filenames should start with the slide ID when using WSI features (e.g. `JN_TS_013_bg_tile_....tiff` → `JN_TS_013_stain_matrix.npy`).
+
+---
+
+## Installation (conda)
+
+These steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in [`requirements.txt`](requirements.txt)).
+
+```bash
+# 1. Create and activate the env (same Python as the reference env)
+conda create -n torchvahadane python=3.11.3
+conda activate torchvahadane
+
+# 2. OpenSlide C library (needed by openslide-python for WSI I/O)
+#    Optional: also install openslide-python from conda-forge to match OceanBear exactly:
+#    conda install -c conda-forge openslide=4.0.0 openslide-python=1.4.3
+conda install -c conda-forge openslide=4.0.0
+
+# 3. Pinned Python dependencies (torch from the CUDA 12.8 index → nvidia-*-cu12 stack)
+pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+
+# 4. Install this package
+pip install .
+```
+
+If you installed `openslide-python` via conda in step 2, pip may report it as already satisfied in step 3.
+
+Confirm the torch build:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda)"
+# expected on OceanBear-style CUDA installs: 2.10.0 / 12.8 (plus nvidia-*-cu12 packages)
+```
+
+Verify GPU access after install:
+
+```bash
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+```
+
+---
+
+## Tested hardware
+
+Development and testing were done on:
+
+| Component | Spec |
+|-----------|------|
+| CPU | Intel Core Ultra 9 185H |
+| RAM | 32 GB |
+| GPU | NVIDIA GeForce RTX 4090 Laptop (16 GB VRAM) |
+| NVIDIA driver | 596.08 (`nvidia-smi` 595.66) |
+| CUDA (driver-reported) | 13.2 |
+| PyTorch CUDA build | 12.8 (`torch==2.10.0+cu128`) |
 
 ---
 
