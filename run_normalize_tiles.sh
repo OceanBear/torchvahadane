@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
-# Run stain normalization (normalize_tiles.py).
-# WSI stain matrices + tissue-only brightness + Vahadane.
+# Run stain normalization with NucSegAI sample images (local/WSL paths).
+# Input:  /mnt/j/HandE/.../original_tiles
+# Output: /mnt/j/HandE/.../SCN_torch_v3
 #
-# Filters (both ON by default in normalize_tiles.py): pixels matching the mask are
-# excluded from Vahadane maxC scaling and keep original RGB in the output.
-#   --disable-black-artifact-filter   turn off dark achromatic artifact handling
-#   --disable-rbc-filter              turn off RBC handling
+# RBC filter: removes dark RBCs (dark<100) with chroma safeguard to avoid removing purple nuclei.
+# Use --disable-rbc-filter or --disable-black-artifact-filter to turn maxC/output handling off.
 #
-# Example RBC tuning (same knobs as normalize_tiles_new_2.py):
-#   --rbc-dark-threshold 100 --rbc-chroma-safeguard 55
-#
-# Input:  /scratch/st-kenfield-1/repos/NucSegAI/sample_images2
-# Output: /scratch/st-kenfield-1/repos/NucSegAI/std_output4
-
+# Per-tile stain estimation (when no WSI stain matrix): normalize_tiles.py can also exclude
+# artifact/RBC pixels from dictionary learning; that is separate from maxC. Pairing:
+#   --disable-rbc-filter  ->  add --disable-stain-est-rbc-exclusion for consistent "RBC off"
+#   --disable-black-artifact-filter  ->  add --disable-stain-est-artifact-exclusion if desired
+# default thresholds:
+#  --grayscale-dark-threshold 35
+#  --chroma-artifact-threshold 20
+#  --v-artifact-threshold 0.20
+#  --rgb-std-artifact-threshold 12
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/sample_images2"
-OUTPUT_DIR="/scratch/st-kenfield-1/repos/NucSegAI/std_output4"
+INPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22"
+OUTPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22_scn"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles.py \
   --input "$INPUT_DIR" \
   --output "$OUTPUT_DIR" \
   --rbc-dark-threshold 100 \
-  --rbc-chroma-safeguard 55
+  --rbc-chroma-safeguard 55 \
+  --disable-rbc-filter
