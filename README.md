@@ -317,8 +317,62 @@ img_normed = normalizer.transform(img)
 
 
 
+## Example images
+
+`example_images/` contains paired H&E tiles for visual comparison of stain color normalization (SCN):
+
+| Filename pattern | Meaning |
+|------------------|---------|
+| `*.tiff` / `*.png` (no `_scn` suffix) | Original tile |
+| `*_scn.tiff` / `*_scn.png` | Same tile after stain color normalization |
+
+PNG previews are shown below (side by side). Matching TIFF files are also included in `example_images/`.
+
+### `TCGA-38-6178-01Z-00-DX1`
+
+<table>
+  <tr>
+    <td align="center"><b>Original</b><br/>
+      <img src="example_images/TCGA-38-6178-01Z-00-DX1.png" alt="TCGA-38-6178-01Z-00-DX1 original" width="420"/>
+    </td>
+    <td align="center"><b>Stain color normalized (`_scn`)</b><br/>
+      <img src="example_images/TCGA-38-6178-01Z-00-DX1_scn.png" alt="TCGA-38-6178-01Z-00-DX1 SCN" width="420"/>
+    </td>
+  </tr>
+</table>
+
+### `TCGA-49-4488-01Z-00-DX1`
+
+<table>
+  <tr>
+    <td align="center"><b>Original</b><br/>
+      <img src="example_images/TCGA-49-4488-01Z-00-DX1.png" alt="TCGA-49-4488-01Z-00-DX1 original" width="420"/>
+    </td>
+    <td align="center"><b>Stain color normalized (`_scn`)</b><br/>
+      <img src="example_images/TCGA-49-4488-01Z-00-DX1_scn.png" alt="TCGA-49-4488-01Z-00-DX1 SCN" width="420"/>
+    </td>
+  </tr>
+</table>
+
+### `TCGA-69-7764-01A-01-TS1`
+
+<table>
+  <tr>
+    <td align="center"><b>Original</b><br/>
+      <img src="example_images/TCGA-69-7764-01A-01-TS1.png" alt="TCGA-69-7764-01A-01-TS1 original" width="420"/>
+    </td>
+    <td align="center"><b>Stain color normalized (`_scn`)</b><br/>
+      <img src="example_images/TCGA-69-7764-01A-01-TS1_scn.png" alt="TCGA-69-7764-01A-01-TS1 SCN" width="420"/>
+    </td>
+  </tr>
+</table>
+
+These tiles are from the open [The Cancer Genome Atlas (TCGA)](https://www.genome.gov/Funded-Programs-Projects/Cancer-Genome-Atlas) dataset.
+
 ## Acknowledgments
 
 Upstream TorchVahadane and its dependencies are credited in [torchvahadane.md](torchvahadane.md#acknowledgments) ([StainTools](https://github.com/Peter554/StainTools), [pytorch-lasso](https://github.com/rfeinman/pytorch-lasso), [torchstain](https://github.com/EIDOSLAB/torchstain)).
 
 The default stain-normalization reference image in `ref_image/` is from [NucSegAI](https://github.com/gevaertlab/NucSegAI/tree/master/ref_image) ([gevaertlab/NucSegAI](https://github.com/gevaertlab/NucSegAI)).
+
+Example tiles in `example_images/` are from [TCGA](https://www.genome.gov/Funded-Programs-Projects/Cancer-Genome-Atlas).
