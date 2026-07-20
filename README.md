@@ -335,7 +335,7 @@ PNG previews are shown below (side by side). Matching TIFF files are also includ
     <td align="center"><b>Original</b><br/>
       <img src="example_images/TCGA-38-6178-01Z-00-DX1.png" alt="TCGA-38-6178-01Z-00-DX1 original" width="420"/>
     </td>
-    <td align="center"><b>Stain color normalized (`_scn`)</b><br/>
+    <td align="center"><b>Stain color normalized</b><br/>
       <img src="example_images/TCGA-38-6178-01Z-00-DX1_scn.png" alt="TCGA-38-6178-01Z-00-DX1 SCN" width="420"/>
     </td>
   </tr>
@@ -348,7 +348,7 @@ PNG previews are shown below (side by side). Matching TIFF files are also includ
     <td align="center"><b>Original</b><br/>
       <img src="example_images/TCGA-49-4488-01Z-00-DX1.png" alt="TCGA-49-4488-01Z-00-DX1 original" width="420"/>
     </td>
-    <td align="center"><b>Stain color normalized (`_scn`)</b><br/>
+    <td align="center"><b>Stain color normalized</b><br/>
       <img src="example_images/TCGA-49-4488-01Z-00-DX1_scn.png" alt="TCGA-49-4488-01Z-00-DX1 SCN" width="420"/>
     </td>
   </tr>
@@ -361,7 +361,7 @@ PNG previews are shown below (side by side). Matching TIFF files are also includ
     <td align="center"><b>Original</b><br/>
       <img src="example_images/TCGA-69-7764-01A-01-TS1.png" alt="TCGA-69-7764-01A-01-TS1 original" width="420"/>
     </td>
-    <td align="center"><b>Stain color normalized (`_scn`)</b><br/>
+    <td align="center"><b>Stain color normalized</b><br/>
       <img src="example_images/TCGA-69-7764-01A-01-TS1_scn.png" alt="TCGA-69-7764-01A-01-TS1 SCN" width="420"/>
     </td>
   </tr>
