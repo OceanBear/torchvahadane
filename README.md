@@ -9,7 +9,7 @@ This repository is a fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torc
 | Component | Role |
 |-----------|------|
 | `normalize_tiles.py` | Batch-normalize H&E tiles against a reference image |
-| `helper_scripts/extract_wsi_features.py` | Estimate per-slide stain matrices from WSIs |
+| `helper_scripts/extract_wsi_features.py` | Estimate per-slide stain matrices from WSIs(`.svs`) |
 | `helper_scripts/npy_to_json.py` | Convert WSI feature `.npy` files to JSON |
 | `helper_scripts/convert_images_to_tiff.py` | Batch-convert PNG/JPG to TIFF |
 | `helper_scripts/check_luminosity.py` | QC: mean LAB L per TIFF |
@@ -77,6 +77,9 @@ conda install -c conda-forge openslide=4.0.0
 # 3. Pinned Python dependencies (torch from the CUDA 12.8 index → nvidia-*-cu12 stack)
 pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 
+# If installation of spams fails, please try:
+pip install spams-bin
+
 # 4. Install this package
 pip install .
 ```
@@ -100,7 +103,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 
 ## Tested hardware
 
-Development and testing were done on:
+Our development and testing were done on:
 
 | Component | Spec |
 |-----------|------|
