@@ -158,4 +158,6 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-run_normalize_tiles_new_local.sh
+# Local WSI stain feature outputs
+wsi_features/
+wsi_features_json/

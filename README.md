@@ -29,7 +29,7 @@ This repository is a fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torc
 ```
 
 1. **(Optional)** Estimate a robust stain matrix per slide from the WSI.
-2. Place a **reference** H&E image in `ref_image/` (target stain style).
+2. Place a **reference** H&E image in `ref_image/` (target stain style). The bundled reference is from [NucSegAI](https://github.com/gevaertlab/NucSegAI/tree/master/ref_image); you can replace it with your own.
 3. Run **`normalize_tiles.py`** on a folder of tiles.
 
 For each tile, the normalizer:
@@ -226,3 +226,5 @@ img_normed = normalizer.transform(img)
 ## Acknowledgments
 
 Upstream TorchVahadane and its dependencies are credited in [torchvahadane.md](torchvahadane.md#acknowledgments) ([StainTools](https://github.com/Peter554/StainTools), [pytorch-lasso](https://github.com/rfeinman/pytorch-lasso), [torchstain](https://github.com/EIDOSLAB/torchstain)).
+
+The default stain-normalization reference image in `ref_image/` is from [NucSegAI](https://github.com/gevaertlab/NucSegAI/tree/master/ref_image) ([gevaertlab/NucSegAI](https://github.com/gevaertlab/NucSegAI)).
