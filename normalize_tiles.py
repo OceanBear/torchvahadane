@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Stain-normalize H&E tiles using a reference image.
-Follows the NucSegAI stain_norm_new pattern:
+Follows the HoVer-Net stain_norm_new pattern:
   - Tissue-only brightness standardization (scale only tissue pixels; blank regions unchanged).
   - Vahadane normalization on standardized reference and tiles.
   - Optional black-artifact handling (same detection as normalize_tiles_new_2): those

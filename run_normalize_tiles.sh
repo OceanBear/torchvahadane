@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run stain normalization with NucSegAI sample images (local/WSL paths).
+# Run stain normalization with HoVer-Net sample images (local/WSL paths).
 # Input:  /mnt/j/HandE/.../original_tiles
 # Output: /mnt/j/HandE/.../SCN_torch_v3
 #
