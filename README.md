@@ -2,7 +2,7 @@
 
 GPU-accelerated [Vahadane](https://ieeexplore.ieee.org/document/7460968) stain normalization for H&E tiles, with practical additions for batch tile pipelines: tissue-only brightness standardization, optional black-artifact and RBC handling, and optional slide-level stain matrices from whole-slide images (WSIs).
 
-This repository is a fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torchvahadane). The original library documentation (API usage, histogram matching, WSI median stain estimation, installation, benchmarks) is preserved in **[torchvahadane.md](torchvahadane.md)**.
+This repository is an [Enfield Lab](https://github.com/EnfieldLab) fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torchvahadane). The original library documentation (API usage, histogram matching, WSI median stain estimation, installation, benchmarks) is preserved in **[torchvahadane.md](torchvahadane.md)**.
 
 Our development and testing were done on a Windows 11 PC with Windows Subsystem for Linux ([WSL](https://learn.microsoft.com/en-us/windows/wsl/install)).
 
@@ -358,3 +358,7 @@ Upstream TorchVahadane and its dependencies are credited in [torchvahadane.md](t
 The default stain-normalization reference image (`ref_image/ref_image_JN_TS_022.tiff`) was provided by Consultant Pathologist Dr. Julia Naso, MD/PhD (Vancouver General Hospital | University of British Columbia).
 
 Example tiles in `example_images/` are from [TCGA](https://www.genome.gov/Funded-Programs-Projects/Cancer-Genome-Atlas).
+
+## License
+
+This project is released under the [MIT License](LICENSE). It is an [Enfield Lab](https://github.com/EnfieldLab) fork of [TorchVahadane](https://github.com/cwlkr/torchvahadane) (also MIT); see `LICENSE` for copyright notices.
