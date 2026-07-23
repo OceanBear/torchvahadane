@@ -33,7 +33,7 @@ This repository is a fork of [cwlkr/torchvahadane](https://github.com/cwlkr/torc
 ```
 
 1. **(Optional)** Estimate a robust stain matrix per slide from the WSI.
-2. Place a **reference** H&E image in `ref_image/` (target stain style). The bundled reference is from [NucSegAI](https://github.com/gevaertlab/NucSegAI/tree/master/ref_image); you can replace it with your own.
+2. Place a **reference** H&E image in `ref_image/` (target stain style). The bundled reference is `ref_image/ref_image_JN_TS_022.tiff`; you can replace it with your own.
 3. Run `normalize_tiles.py` on a folder of tiles.
 
 For each tile, the normalizer:
@@ -72,7 +72,9 @@ Tile filenames should start with the slide ID when using WSI features (e.g. `JN_
 
 ## Installation (requires Conda/Miniconda)
 
-These steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in `[requirements.txt](requirements.txt)`).
+Our development and testing were done on a Windows 11 PC with Windows Subsystem for Linux ([WSL](https://learn.microsoft.com/en-us/windows/wsl/install)).
+
+The following steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in `[requirements.txt](requirements.txt)`).
 
 ```bash
 # 1. Create and activate the env (same Python as the reference env)
@@ -108,27 +110,6 @@ Verify GPU access after install:
 ```bash
 python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
 ```
-
----
-
-
-
-## Tested hardware
-
-Our development and testing were done a Windows 11 PC with Windows Subsystem for Linux ([WSL](https://learn.microsoft.com/en-us/windows/wsl/install)). 
-
-The spec of this PC are shown below:
-
-
-| Component              | Spec                                        |
-| ---------------------- | ------------------------------------------- |
-| CPU                    | Intel Core Ultra 9 185H                     |
-| RAM                    | 32 GB                                       |
-| GPU                    | NVIDIA GeForce RTX 4090 Laptop (16 GB VRAM) |
-| NVIDIA driver          | 596.08 (`nvidia-smi` 595.66)                |
-| CUDA (driver-reported) | 13.2                                        |
-| PyTorch CUDA build     | 12.8 (`torch==2.10.0+cu128`)                |
-
 
 ---
 
@@ -321,51 +302,42 @@ img_normed = normalizer.transform(img)
 
 `example_images/` contains paired H&E tiles for visual comparison of stain color normalization (SCN):
 
-| Filename pattern | Meaning |
-|------------------|---------|
-| `*.tiff` / `*.png` (no `_scn` suffix) | Original tile |
-| `*_scn.tiff` / `*_scn.png` | Same tile after stain color normalization |
+
+| Filename pattern                      | Meaning                                   |
+| ------------------------------------- | ----------------------------------------- |
+| `*.tiff` / `*.png` (no `_scn` suffix) | Original tile                             |
+| `*_scn.tiff` / `*_scn.png`            | Same tile after stain color normalization |
+
 
 PNG previews are shown below (side by side). Matching TIFF files are also included in `example_images/`.
 
 ### `TCGA-38-6178-01Z-00-DX1`
 
-<table>
-  <tr>
-    <td align="center"><b>Original</b><br/>
-      <img src="example_images/TCGA-38-6178-01Z-00-DX1.png" alt="TCGA-38-6178-01Z-00-DX1 original" width="420"/>
-    </td>
-    <td align="center"><b>Stain color normalized</b><br/>
-      <img src="example_images/TCGA-38-6178-01Z-00-DX1_scn.png" alt="TCGA-38-6178-01Z-00-DX1 SCN" width="420"/>
-    </td>
-  </tr>
-</table>
+
+|              |                            |
+| ------------ | -------------------------- |
+| **Original** | **Stain color normalized** |
+
+
+
 
 ### `TCGA-49-4488-01Z-00-DX1`
 
-<table>
-  <tr>
-    <td align="center"><b>Original</b><br/>
-      <img src="example_images/TCGA-49-4488-01Z-00-DX1.png" alt="TCGA-49-4488-01Z-00-DX1 original" width="420"/>
-    </td>
-    <td align="center"><b>Stain color normalized</b><br/>
-      <img src="example_images/TCGA-49-4488-01Z-00-DX1_scn.png" alt="TCGA-49-4488-01Z-00-DX1 SCN" width="420"/>
-    </td>
-  </tr>
-</table>
+
+|              |                            |
+| ------------ | -------------------------- |
+| **Original** | **Stain color normalized** |
+
+
+
 
 ### `TCGA-69-7764-01A-01-TS1`
 
-<table>
-  <tr>
-    <td align="center"><b>Original</b><br/>
-      <img src="example_images/TCGA-69-7764-01A-01-TS1.png" alt="TCGA-69-7764-01A-01-TS1 original" width="420"/>
-    </td>
-    <td align="center"><b>Stain color normalized</b><br/>
-      <img src="example_images/TCGA-69-7764-01A-01-TS1_scn.png" alt="TCGA-69-7764-01A-01-TS1 SCN" width="420"/>
-    </td>
-  </tr>
-</table>
+
+|              |                            |
+| ------------ | -------------------------- |
+| **Original** | **Stain color normalized** |
+
 
 These tiles are from the open [The Cancer Genome Atlas (TCGA)](https://www.genome.gov/Funded-Programs-Projects/Cancer-Genome-Atlas) dataset.
 
@@ -373,6 +345,6 @@ These tiles are from the open [The Cancer Genome Atlas (TCGA)](https://www.genom
 
 Upstream TorchVahadane and its dependencies are credited in [torchvahadane.md](torchvahadane.md#acknowledgments) ([StainTools](https://github.com/Peter554/StainTools), [pytorch-lasso](https://github.com/rfeinman/pytorch-lasso), [torchstain](https://github.com/EIDOSLAB/torchstain)).
 
-The default stain-normalization reference image in `ref_image/` is from [NucSegAI](https://github.com/gevaertlab/NucSegAI/tree/master/ref_image) ([gevaertlab/NucSegAI](https://github.com/gevaertlab/NucSegAI)).
+The default stain-normalization reference image (`ref_image/ref_image_JN_TS_022.tiff`) was provided by Consultant Pathologist Dr. Julia Naso, MD/PhD (Vancouver General Hospital | University of British Columbia).
 
 Example tiles in `example_images/` are from [TCGA](https://www.genome.gov/Funded-Programs-Projects/Cancer-Genome-Atlas).
