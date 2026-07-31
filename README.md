@@ -74,7 +74,7 @@ Tile filenames should start with the slide ID when using WSI features (e.g. `JN_
 
 ## Installation (requires Conda/Miniconda)
 
-These steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in `[requirements.txt](requirements.txt)`).
+These steps recreate the development environment used for this fork (`torchvahadane`: **Python 3.11.3**, packages pinned in [requirements.txt](requirements.txt)).
 
 ```bash
 # 1. Create and activate the env (same Python as the reference env)
