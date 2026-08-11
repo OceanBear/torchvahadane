@@ -82,7 +82,7 @@ conda create -n torchvahadane python=3.11.3
 conda activate torchvahadane
 
 # 2. OpenSlide C library (needed by openslide-python for WSI I/O)
-#    Optional: also install openslide-python from conda-forge to match OceanBear exactly:
+#    Optional: also install openslide-python from conda-forge
 #    conda install -c conda-forge openslide=4.0.0 openslide-python=1.4.3
 conda install -c conda-forge openslide=4.0.0
 
@@ -102,7 +102,7 @@ Confirm the torch build:
 
 ```bash
 python -c "import torch; print(torch.__version__, torch.version.cuda)"
-# expected on OceanBear-style CUDA installs: 2.10.0 / 12.8 (plus nvidia-*-cu12 packages)
+# expected CUDA installs: 2.10.0 / 12.8 (plus nvidia-*-cu12 packages)
 ```
 
 Verify GPU access after install:
