@@ -9,10 +9,10 @@
 # - spams is required for staintools_estimate=True; optional if you only use GPU extraction.
 
 numpy==1.23.5
-opencv-python==4.8.1.78
+opencv-python
 scipy==1.11.4
 torch==2.10.0
 tqdm==4.67.3
 Pillow==12.1.0
 openslide-python==1.4.3
-spams==2.6.5.4
+spams-bin

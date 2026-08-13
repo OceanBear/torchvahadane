@@ -96,6 +96,14 @@ pip install spams-bin
 pip install .
 ```
 
+Alternatively, you can recreate the exact pinned environment from the included spec file using:
+
+```bash
+conda create --name torchvahadane --file spec_list_torchvahadane.txt
+conda activate torchvahadane
+```
+The `spec_list_torchvahadane.txt` file is included in this repository and captures the package versions used during development.
+
 If you installed `openslide-python` via conda in step 2, pip may report it as already satisfied in step 3.
 
 Confirm the torch build:

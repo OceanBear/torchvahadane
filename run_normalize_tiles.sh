@@ -18,8 +18,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22"
-OUTPUT_DIR="/mnt/d/BCCRC-work/new_training/tiles_tumor_22_scn"
+INPUT_DIR="/mnt/wsl/projects/NucSegAI/sample_images"
+OUTPUT_DIR="/mnt/wsl/projects/NucSegAI/sample_images_scn"
 
 cd "$SCRIPT_DIR"
 python normalize_tiles.py \
@@ -27,4 +27,5 @@ python normalize_tiles.py \
   --output "$OUTPUT_DIR" \
   --rbc-dark-threshold 100 \
   --rbc-chroma-safeguard 55 \
-  --disable-rbc-filter
+  --disable-rbc-filter \
+  --wsi-features "/mnt/f/data/HandE/sow1885_n201/wsi_stain_feature/wsi_features"
